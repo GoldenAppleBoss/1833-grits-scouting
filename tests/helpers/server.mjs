@@ -25,6 +25,7 @@ export async function createTestServer() {
     await db.query("INSERT INTO shared_login.portal_sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '1 hour')",[digest(`test-token-${user.id}`),user.id]);
   }
   await db.exec(`INSERT INTO scouting.events(event_key,name,imported_at) VALUES('2026test','Test Invitational',now());
+    SELECT setval(pg_get_serial_sequence('shared_login.portal_users','id'),5,true);
     INSERT INTO scouting.teams(event_key,team_number,name) VALUES('2026test',1833,'Team BEAN'),('2026test',100,'Red Two'),('2026test',200,'Red Three'),('2026test',300,'Blue One'),('2026test',400,'Blue Two'),('2026test',500,'Blue Three');
     INSERT INTO scouting.matches(event_key,match_key,match_number,comp_level,red,blue) VALUES
       ('2026test','qm1',1,'qm',ARRAY[1833,100,200],ARRAY[300,400,500]),

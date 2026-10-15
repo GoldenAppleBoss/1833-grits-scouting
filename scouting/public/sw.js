@@ -1,6 +1,6 @@
 const CACHE_PREFIX = 'team1833-scouting-portal-';
-const CACHE = CACHE_PREFIX + 'v6';
-const SHELL = ['/scouting/', '/scouting/index.html', '/scouting/styles.css', '/scouting/brand.css', '/scouting/app.js', '/scouting/model.js', '/scouting/manifest.webmanifest', '/scouting/icon.png', '/scouting/team1833-logo.png', '/scouting/chewy.ttf'];
+const CACHE = CACHE_PREFIX + 'v7';
+const SHELL = ['/scouting/', '/scouting/index.html', '/scouting/styles.css', '/scouting/brand.css', '/scouting/themes.css', '/scouting/theme.js', '/scouting/settings.js', '/scouting/charts.js', '/scouting/app.js', '/scouting/model.js', '/scouting/manifest.webmanifest', '/scouting/icon.png', '/scouting/team1833-logo.png', '/scouting/chewy.ttf'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });

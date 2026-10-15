@@ -31,7 +31,7 @@ test('scoring ignores all historic climbing and separate endgame data',()=>{
 });
 test('simplified records require no climbing, cycles, starting position or endgame fuel',()=>{
   const record=testRecord();
-  for(const field of ['startingLocation','autoClimb','endgameLevel','autoCycles','teleopCycles','endgameFuel']){
+  for(const field of ['startingLocation','autoClimb','endgameLevel','autoCycles','teleopCycles','endgameFuel','teleopInactiveFuel']){
     assert.equal(record[field],undefined);
     assert.ok(!COUNTERS.includes(field));
   }

@@ -1,17 +1,17 @@
 // Pure shared rules used by browser, API and unit tests.
-export const COUNTERS = ['autoFuel','teleopFuel','teleopInactiveFuel','autoPassed','teleopPassed','autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings'];
+export const COUNTERS = ['autoFuel','teleopFuel','autoPassed','teleopPassed','autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings'];
 export const STATUSES = ['Normal','No Show','Disabled','Disconnected','Immobilized / Stuck','Tipped','Mechanical Failure','Other Failure'];
 export function eventKey(value) { return String(value || '').trim().toLowerCase(); }
 export function normalizeRecord(record) {
   return { ...record, eventKey: eventKey(record.eventKey) || 'legacy', matchKey: record.matchKey || `qm${record.matchNumber}`, kind: record.kind || 'quantitative', ownerUserId: record.ownerUserId == null ? null : String(record.ownerUserId) };
 }
 export function validateRecord(input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Record is required';
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Match is required';
   const r = normalizeRecord(input);
   if (!/^(2026[a-z0-9]+|legacy)$/.test(r.eventKey)) return 'Choose a 2026 event key';
   if (typeof r.matchKey !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(r.matchKey)) return 'Invalid match key';
   if (!['quantitative','qualitative'].includes(r.kind)) return 'Invalid scouting page';
-  for (const key of ['recordId','deviceId']) if (typeof r[key] !== 'string' || !r[key] || r[key].length > 200) return `${key} is required`;
+  for (const key of ['recordId','deviceId']) if (typeof r[key] !== 'string' || !r[key] || r[key].length > 200) return `${key==='recordId'?'Match ID':'Device ID'} is required`;
   for (const key of ['matchNumber','teamNumber','revision']) if (!Number.isInteger(r[key]) || r[key] < 1 || r[key] > 2147483647) return `${key} must be a positive integer`;
   if (typeof r.completed !== 'boolean') return 'completed must be a boolean';
   if (r.schemaVersion >= 4 && !['red','blue'].includes(r.alliance)) return 'Choose a red or blue alliance';
@@ -74,7 +74,7 @@ export const METRICS = {
   autoPoints: { label:'Estimated autonomous fuel points', value:r => number(r.autoFuel) },
   teleopPoints: { label:'Estimated teleop fuel points', value:r => number(r.teleopFuel) },
   estimatedPoints: { label:'Estimated fuel points', value:r => sumFields(r,['autoFuel','teleopFuel']) },
-  reliability: { label:'Working as intended %', value:r => STATUSES.includes(r.robotStatus)?(r.robotStatus==='Normal'?100:0):null },
+  reliability: { label:'Reliability (%)', value:r => STATUSES.includes(r.robotStatus)?(r.robotStatus==='Normal'?100:0):null },
   bumpCrossings: { label:'Bump crossings', value:r => sumFields(r,['autoBumpCrossings','teleopBumpCrossings']) },
   trenchCrossings: { label:'Trench crossings', value:r => sumFields(r,['autoTrenchCrossings','teleopTrenchCrossings']) },
   crossings: { label:'Bump + trench crossings', value:r => sumFields(r,crossingFields) }

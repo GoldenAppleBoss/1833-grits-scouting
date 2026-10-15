@@ -10,6 +10,7 @@
     { "source": "/signup", "destination": "/api/index" },
     { "source": "/login", "destination": "/api/index" },
     { "source": "/logout", "destination": "/api/index" },
+    { "source": "/settings", "destination": "/api/index" },
     { "source": "/admin", "destination": "/api/index" },
     { "source": "/admin/:path*", "destination": "/api/index" },
     { "source": "/api/:path*", "destination": "/api/index" },

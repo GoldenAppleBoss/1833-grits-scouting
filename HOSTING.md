@@ -291,6 +291,8 @@ fields such as passing counts remain unknown in legacy analytics, not zeros.
 - Quantitative observations count active-hub fuel, passed fuel, bump/trench
   crossings and robot status. Crossings have only +1 and -1 controls. Starting
   location, climbing, manual cycle counts and separate endgame fuel are omitted.
+  Inactive-hub fuel is also omitted. Older JSON fields are retained for existing
+  saved matches but do not appear in the scouting form or analytics metrics.
 - Cycle estimates are computed per match as
   `Math.trunc(0.9 * (autoBumpCrossings + autoTrenchCrossings + teleopBumpCrossings + teleopTrenchCrossings))`.
   Team averages use those per-match estimates. Missing historical crossing
@@ -309,6 +311,15 @@ fields such as passing counts remain unknown in legacy analytics, not zeros.
 - Each metric has its own per-team match inclusion and symmetric tail-trimming
   controls. Trimming keeps at least one observation. Means, medians, quartiles
   and 1.5×IQR whiskers use the retained sample; raw records remain unchanged.
+- Analytics opens with a team leaderboard and separate Bar chart, Box plot,
+  Bubble chart and Fuel breakdown views. Sample filters are collapsed below
+  the chart. Box plots use actual quartiles, median, non-outlier whiskers and
+  outliers, with shared numerical axes. Hover/focus details show exact values.
+- Each bubble represents one team. X and Y metrics are selected independently;
+  bubble size defaults to matches scouted and can use another metric. Positions
+  use team means. Unknown values are omitted, and all-zero or equal-valued data
+  keeps a valid scale. Reliability axes run from 0 to 100 percent. Selecting a
+  bubble focuses that team's match history.
 - Leaderboard colors reflect percentile rank within the event: red below 33,
   yellow from 33, green from 67. Numeric values display two decimal places.
 - Qualitative notes and tags have their own page, including retained legacy
@@ -320,6 +331,32 @@ rechecks live sessions and permissions before synchronizing. Sensitive APIs and
 portal pages are not cached by the service worker.
 
 Backend configuration and failure-path tests are included. See [SCRIPTS.md](SCRIPTS.md) for the included commands.
+
+## Accounts and settings
+
+Migration `202610150003_account_settings.sql` adds first name, last name and
+account preferences. Apply it before deploying this version. Existing accounts
+keep their passwords and permissions; their names remain blank until updated.
+New signup requires both names in the form and on the server.
+
+The gear at the top right opens scouting settings. `/settings` also supports
+accounts without scouting access. Account settings include names, read-only
+email, permissions, appearance, password/security, data/offline tools and About.
+Light, Dark and Bean modes apply immediately and persist on the device; changes
+also save to the account online. The reduced-motion preference disables motion.
+
+Password changes require the current password, matching new passwords of
+12–256 characters, a live session and CSRF protection. Successful changes keep
+the current session and revoke other sessions. Failed attempts are rate limited.
+Email password recovery is intentionally not implemented, so no mail service
+or email credentials are required.
+
+Users can sign out other sessions, download only their own matches, and retry
+their own pending matches without additional permissions. Clearing cached
+schedules leaves saved matches untouched. The export merges local matches with
+their server copies online, retaining the latest revision; offline it exports
+the local matches only. No database table or API field names were renamed, so
+existing devices and historical matches remain compatible.
 
 ## Brand assets
 
