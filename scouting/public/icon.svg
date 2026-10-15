@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Team BEAN 1833 scouting icon">
+  <rect width="512" height="512" rx="110" fill="#12171d"/>
+  <path d="M72 287c-18-105 65-190 171-173 46 8 74-12 114-31 63-31 113 19 102 87-7 48-34 80-69 111-42 38-72 92-143 114-86 26-160-17-175-108Z" fill="#ff4938"/>
+  <text x="256" y="265" text-anchor="middle" font-family="Arial Rounded MT Bold,Arial,sans-serif" font-size="116" font-weight="900" fill="white">BEAN</text>
+  <text x="315" y="339" text-anchor="middle" font-family="Arial,sans-serif" font-size="54" font-weight="900" fill="white">1833</text>
+</svg>

@@ -1,0 +1,10 @@
+legacy/
+exports/
+tests/
+scouting/test.mjs
+scouting/Dockerfile*
+scouting/migrations/
+.local/
+.env*
+backups/
+.agents/

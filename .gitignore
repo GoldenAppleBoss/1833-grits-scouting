@@ -1,0 +1,11 @@
+.local/
+.env
+.env.local
+.env.test
+.env.*.local
+node_modules/
+dist/
+.vercel/
+backups/
+exports/
+**/__pycache__/

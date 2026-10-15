@@ -1,0 +1,18 @@
+{
+  "name": "Team BEAN 1833 Scouting",
+  "short_name": "BEAN Scout",
+  "description": "Secure, offline-first 2026 FRC scouting for Team 1833 Team BEAN.",
+  "start_url": "/scouting/#quantitative",
+  "scope": "/scouting/",
+  "display": "standalone",
+  "background_color": "#f5f7f8",
+  "theme_color": "#ff4938",
+  "icons": [
+    {
+      "src": "/scouting/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

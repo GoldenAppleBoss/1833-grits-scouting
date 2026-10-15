@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#087a99" />
+  <meta name="description" content="Secure, offline-first 2026 FRC scouting app for Team 1833 Team BEAN." />
+  <title>Team BEAN 1833 Scouting</title>
+  <link rel="manifest" href="/scouting/manifest.webmanifest" />
+  <link rel="icon" href="/scouting/icon.svg" />
+  <link rel="stylesheet" href="/scouting/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <a class="brand" href="#quantitative" aria-label="Team BEAN scouting home">
+        <img class="brand-logo" src="/scouting/icon.svg" width="52" height="52" alt="Team BEAN 1833 logo" />
+        <div>
+          <div class="brand-title">TEAM BEAN</div>
+          <div class="brand-subtitle">FRC 1833 · 2026 SCOUTING</div>
+        </div>
+      </a>
+      <div class="header-actions">
+        <div id="networkBadge" class="badge badge-neutral" aria-live="polite">Checking connection…</div>
+        <div id="syncBadge" class="badge badge-neutral" aria-live="polite" hidden>Loading records…</div>
+        <div id="profileArea"></div>
+      </div>
+    </header>
+
+    <nav id="mainNav" class="main-nav" aria-label="Primary navigation" hidden></nav>
+
+    <main id="mainContent" class="main-content" tabindex="-1"></main>
+
+    <footer class="app-footer">
+      <span>Team 1833 · Team BEAN</span>
+      <span id="deviceLabel"></span>
+    </footer>
+  </div>
+
+  <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="/scouting/app.js"></script>
+</body>
+</html>
