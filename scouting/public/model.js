@@ -37,6 +37,23 @@ export function canonicalRecord(record) {
   return copy;
 }
 export function sameMatch(a,b) { return normalizeRecord(a).eventKey === normalizeRecord(b).eventKey && normalizeRecord(a).matchKey === normalizeRecord(b).matchKey && Number(a.teamNumber) === Number(b.teamNumber) && (a.kind || 'quantitative') === (b.kind || 'quantitative'); }
+export const manualScoutingAllowed = permissions => permissions.some(permission => permission !== 'scouting:read');
+export function resolveScoutAssignment(matches, rotation, matchNumber) {
+  if (!rotation) return { error: 'Your account has no scout station for this event. Ask an administrator to assign Red or Blue scout 1, 2 or 3.' };
+  if (!Number.isInteger(matchNumber) || matchNumber < 1) return { error: 'Enter a positive qualification match number.' };
+  const match = matches.find(m => m.comp_level === 'qm' && m.match_number === matchNumber && m.match_key === `qm${matchNumber}`);
+  if (!match) return { error: 'This qualification match is not in the TBA schedule yet. Ask an administrator to refresh the event.' };
+  if ((matchNumber - 1) % rotation.rotation_count !== rotation.rotation - 1) return { error: 'This match belongs to a different rotation group.' };
+  const teamNumber = match[rotation.alliance]?.[rotation.station - 1];
+  if (!Number.isInteger(teamNumber) || teamNumber < 1) return { error: 'The TBA schedule has no robot for your assigned station.' };
+  return { eventKey: match.event_key, matchKey: match.match_key, matchNumber, teamNumber, alliance: rotation.alliance, station: rotation.station };
+}
+export function assignedRecordError(record, matches, rotation) {
+  const assigned = resolveScoutAssignment(matches, rotation, record.matchNumber);
+  if (assigned.error) return assigned.error;
+  if (record.matchKey !== assigned.matchKey || record.teamNumber !== assigned.teamNumber || record.alliance !== assigned.alliance) return 'Scout the robot at your assigned alliance station for this qualification match.';
+  return null;
+}
 export function assignments(matches, rotations, userId) {
   const rotation = rotations.find(r => String(r.user_id) === String(userId));
   if (!rotation) return [];

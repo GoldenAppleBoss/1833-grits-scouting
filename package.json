@@ -1,22 +1,25 @@
 {
-    "name":  "team1833-tools",
-    "version":  "4.0.0",
-    "private":  true,
-    "type":  "module",
-    "engines":  {
-                    "node":  "22.x"
-                },
-    "scripts":  {
-                    "dev":  "node --env-file-if-exists=.env.local scripts/dev.mjs",
-                    "build":  "node scripts/build.mjs",
-                    "test":  "node --test",
-                    "db:check":  "node --env-file-if-exists=.env.local scripts/check-db.mjs",
-                    "check":  "node --check api/index.mjs \u0026\u0026 node --check lib/db.mjs \u0026\u0026 node --check lib/diagnostics.mjs \u0026\u0026 node --check lib/portal.mjs \u0026\u0026 node --check lib/scouting.mjs \u0026\u0026 node --check scouting/public/app.js \u0026\u0026 node --check scouting/public/model.js \u0026\u0026 node --check scripts/build.mjs \u0026\u0026 node --check scripts/check-db.mjs \u0026\u0026 node --check scripts/migrate.mjs",
-                    "db:migrate":  "node --env-file-if-exists=.env.local scripts/migrate.mjs",
-                    "admin:grant":  "node --env-file-if-exists=.env.local scripts/grant-admin.mjs"
-                },
-    "dependencies":  {
-                         "pg":  "8.16.3",
-                         "@node-rs/argon2":  "^2.0.2"
-                     }
+    "name": "team1833-tools",
+    "version": "4.0.0",
+    "private": true,
+    "type": "module",
+    "engines": {
+        "node": "22.x"
+    },
+    "scripts": {
+        "dev": "node --env-file-if-exists=.env.local scripts/dev.mjs",
+        "build": "node scripts/build.mjs",
+        "test": "node --test",
+        "db:check": "node --env-file-if-exists=.env.local scripts/check-db.mjs",
+        "check": "node --check api/index.mjs && node --check lib/db.mjs && node --check lib/diagnostics.mjs && node --check lib/assignments.mjs && node --check lib/portal.mjs && node --check lib/scouting.mjs && node --check scouting/public/app.js && node --check scouting/public/model.js && node --check scripts/build.mjs && node --check scripts/check-db.mjs && node --check scripts/migrate.mjs",
+        "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+        "admin:grant": "node --env-file-if-exists=.env.local scripts/grant-admin.mjs"
+    },
+    "dependencies": {
+        "@node-rs/argon2": "^2.0.2",
+        "pg": "8.16.3"
+    },
+    "devDependencies": {
+        "@electric-sql/pglite": "0.5.10"
+    }
 }

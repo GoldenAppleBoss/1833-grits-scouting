@@ -177,6 +177,43 @@ npm.cmd run admin:grant -- your-existing-signup-email@example.org
 Website administrators can also manage events and rotations when they have
 `scouting:read`. They do not automatically receive the other area permissions.
 
+### Quantitative-only accounts and robot assignments
+
+Accounts whose only permission is `scouting:read` select an imported event and
+enter a qualification match number. The server resolves the robot from that
+account's event station: Red scout 1/2/3 or Blue scout 1/2/3, in TBA alliance
+order. The page previews the robot and keeps its team number and alliance
+visible while scouting. Robot, alliance, event-key and playoff-key inputs are
+not offered to these accounts. An account without an event station or published
+match cannot begin a new observation. Starting location is chosen after starting.
+
+Any permission in addition to `scouting:read` keeps manual robot and match
+selection, including playoffs and unscheduled matches. This override does not
+grant permission to manage users, events, or other scouting areas. Submission
+locks and schedule validation still apply.
+
+In `/admin`, first grant quantitative scouting access, then use **Event scout
+stations** on the user's account to set or remove their station. One rotation
+group covers every qualification match. For larger crews, set a common total
+group count and assign each user a group. Duplicate stations within a group
+are rejected. Use **Scouting administration** to change all event groups together.
+
+The shared assignment rules are enforced on the API as well as in the UI.
+Offline work uses the last cached schedule; synchronization checks current
+assignments again. If assignments change, a mismatched saved draft is preserved
+on the device and flagged for administrator review.
+
+The TBA key can be provided through `TBA_API_KEY` or stored in the private
+`shared_login.service_settings` table by a trusted database administrator.
+The environment variable takes precedence. Migration
+`202610150002_server_settings.sql` creates this table with RLS enabled and no
+browser-role access. Keys are never returned in API responses or bundled into
+browser assets. An API key supplied in the import form applies to that import.
+When a scout resolves a match online, schedules older than five minutes are
+refreshed from TBA if a server key is configured. Reimport the event manually
+to refresh event/team names too. The supplied project key has been configured
+in the existing Supabase database; new databases need their own configuration.
+
 ## 5. Import the event and assign rotations
 
 1. Obtain a Read API key from your [TBA account](https://www.thebluealliance.com/account).
@@ -197,10 +234,10 @@ Website administrators can also manage events and rotations when they have
    are gray and disabled; the API also enforces assignments and immutable
    submission locks. Playoffs use manual selection with the imported match key.
 
-No schedule yet? Quantitative and qualitative observations can be started
+No schedule yet? Users with additional permissions can start observations
 manually with a 2026 event key, match number/key, robot, alliance and starting
-location. Once a qualification rotation exists, that user's scheduled
-quantitative submissions must match it. Starting locations are team-defined
+location. Quantitative-only users need an imported schedule and an assigned
+station before they can start. Starting locations are team-defined
 Left/Center/Right choices while facing the field, not official scoring zones.
 
 ## 6. Connect tools.team1833.org

@@ -1,4 +1,4 @@
-import { COUNTERS, STATUSES, STARTS, METRICS, normalizeRecord, validateRecord, sameMatch, teamAnalytics, searchTeams, percentile } from './model.js';
+import { COUNTERS, STATUSES, STARTS, METRICS, normalizeRecord, validateRecord, sameMatch, teamAnalytics, searchTeams, percentile, resolveScoutAssignment, assignedRecordError } from './model.js';
 
 const $=selector=>document.querySelector(selector), $$=selector=>[...document.querySelectorAll(selector)];
 const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
@@ -9,6 +9,7 @@ let db,auth=null,offline=false,events=[],event='',context={teams:[],matches:[],a
 let remoteRecords=[],viewVersion=0,syncing=false,saveTimer,adminData=null,allianceData=[],analysisOptions={},search='',metric='totalFuel',view='leaderboard',selectedMatch=null;
 let draftRows=[];
 const can=p=>Boolean(auth?.user.permissions?.[p]);
+const assignedOnly=()=>auth?.user.manualScouting!==true;
 const route=()=>['quantitative','qualitative','analytics','alliances','sync','admin','profile'].includes(location.hash.slice(1))?location.hash.slice(1):'quantitative';
 const allowed=r=>r==='quantitative'||r==='profile'||(r==='qualitative'?can('qualitative'):r==='alliances'?can('alliances'):can(r));
 const title=r=>({quantitative:'Quantitative scouting',qualitative:'Qualitative scouting',analytics:'Event analytics',alliances:'Alliance hub',sync:'Synchronization',admin:'Scouting administration',profile:'Your account'})[r];
@@ -77,11 +78,24 @@ function options(values,current){return values.map(v=>`<option value="${esc(v)}"
 function heading(name,description){return`<div class="page-heading"><div><h1>${name}</h1><p>${description}</p></div></div>`;}
 function field(label,name,value,type='text',extra=''){return`<label class="field">${label}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;}
 function matchStart(kind){
+  if(kind==='quantitative'&&assignedOnly()){
+    const rotation=context.rotation;
+    return `<section class="card match-launch"><span class="eyebrow">YOUR NEXT MATCH</span><h2>One match. One robot.</h2><p>${rotation?`You are <strong>${rotation.alliance==='red'?'Red':'Blue'} scout ${rotation.station}</strong>. Enter a qualification match number and we’ll find your robot from TBA.`:'Ask an administrator to assign your scout station for this event.'}</p>
+      <form id="assignedStartForm"><label class="field">Qualification match number<input id="assignedMatchNumber" name="matchNumber" type="number" inputmode="numeric" min="1" max="2147483647" placeholder="e.g. 12" required ${!event||!rotation?'disabled':''} aria-describedby="assignmentPreview"></label>
+      <div id="assignmentPreview" class="assignment-preview" aria-live="polite">${event?'Enter a match number to see your robot.':'Choose your event above to get started.'}</div>
+      <button class="button button-primary" ${!event||!rotation?'disabled':''}>Find my robot & start</button></form></section>`;
+  }
   return`<section class="card"><h2>Start ${kind==='qualitative'?'a qualitative observation':'a match'}</h2><form id="startForm" class="grid grid-2">${field('Event key','eventKey',event,'text','required pattern="2026[a-z0-9]+" placeholder="2026tnkn"')}${field('Match number','matchNumber','','number','min="1" max="2147483647" required')}${field('Match key (optional for qualifications)','matchKey','','text','placeholder="qm1, sf1m1, f1m1"')}${field('Team number','teamNumber','','number','min="1" required list="teamNumbers"')}
     <datalist id="teamNumbers">${context.teams.map(t=>`<option value="${t.team_number}">${esc(t.name)}</option>`).join('')}</datalist>
     <label class="field">Alliance<select name="alliance" required><option value="">Choose red or blue</option>${options(['red','blue'],'')}</select></label>
     ${kind==='quantitative'?`<label class="field">Starting location (facing the field)<select name="startingLocation" required><option value="">Choose a position</option>${options(STARTS,'')}</select></label>`:''}
     <button class="button button-primary" type="submit">Start Match</button></form></section>`;
+}
+function robotBanner(record, preview=false){
+  const station=record.station||(assignedOnly()?context.rotation?.station:null);
+  return `<section class="robot-banner ${record.alliance==='red'?'red':'blue'} ${preview?'preview':''}" aria-label="Assigned robot">
+    <div><span class="eyebrow">${preview?'YOUR ASSIGNED ROBOT':'YOU ARE SCOUTING'}</span><div class="robot-number"><span>TEAM</span> ${Number(record.teamNumber)}</div><p>${esc(teamName(record.teamNumber))}</p></div>
+    <div class="robot-meta"><span class="station-pill">${record.alliance==='red'?'RED':'BLUE'}${station?` SCOUT ${station}`:' ALLIANCE'}</span><strong>${/^qm\d+$/.test(record.matchKey)?`QUALIFICATION ${Number(record.matchNumber)}`:esc(String(record.matchKey).toUpperCase())}</strong><span>${esc(record.eventKey||event)}</span></div></section>`;
 }
 async function renderScouting(kind){
   const local=(await all()).map(normalizeRecord),own=[...new Map([...context.completed,...local].map(r=>[r.recordId,r])).values()].filter(r=>r.ownerUserId===auth.user.id&&r.eventKey===event&&r.kind===kind);
@@ -92,12 +106,15 @@ async function renderScouting(kind){
     const observations=kind==='qualitative'?(await records()).filter(r=>r.completed&&(r.kind==='qualitative'||r.notes||(r.tags||[]).length)):[];
     return heading(title(kind),kind==='quantitative'?'Your assigned matches and fast counts, with automatic local saving.':'Record observations, tags, defense, and strategy separately from quantitative counts.')+
       (observations.length?`<section class="card"><h2>Event observations</h2>${observations.map(r=>`<details><summary>${esc(teamLabel(r.teamNumber))} · ${esc(r.matchKey)}${r.kind!=='qualitative'?' · legacy notes':''}</summary><p>${(r.tags||[]).map(esc).join(' · ')}</p><p class="preserve-lines">${esc(r.notes)}</p></details>`).join('')}</section>`:'')+
-      (cards?`<section class="card"><h2>Your scouting rotation</h2><p>Alliance color and robot are assigned by your administrator. Submitted matches are disabled.</p><div class="assignments">${cards}</div></section>`:'')+
-      (kind==='qualitative'||!context.rotation?matchStart(kind):`<details class="card"><summary>Manual playoff or unscheduled match</summary>${matchStart(kind)}</details>`)+
+      (kind==='quantitative'&&assignedOnly()?matchStart(kind):'')+
+      (cards?`<section class="card"><div class="section-top"><h2>Your match schedule</h2><span class="badge">${assigned.length} assigned matches</span></div><p>${context.rotation?`${context.rotation.alliance==='red'?'Red':'Blue'} scout ${context.rotation.station} · Group ${context.rotation.rotation} of ${context.rotation.rotation_count}. `:''}Submitted matches are locked.</p><div class="assignments">${cards}</div></section>`:'')+
+      (kind==='quantitative'&&assignedOnly()?'':kind==='qualitative'||!context.rotation?matchStart(kind):`<details class="card"><summary>Manual playoff or unscheduled match</summary>${matchStart(kind)}</details>`)+
       `<section class="card"><h2>Your event records</h2>${own.length?`<div class="table-wrap"><table><thead><tr><th>Match</th><th>Team</th><th>Status</th><th></th></tr></thead><tbody>${own.map(r=>`<tr><td>${esc(r.matchKey)}</td><td>${esc(teamLabel(r.teamNumber))}</td><td>${esc(r.syncStatus||'local')}${r.lastSyncError?`<small class="error-text">${esc(r.lastSyncError)}</small>`:''}</td><td>${!r.completed&&r.syncStatus!=='locked'?`<button class="mini-button" data-resume="${esc(r.recordId)}">Resume</button>`:'Submitted · locked'}</td></tr>`).join('')}</tbody></table></div>`:'<p>No records at this event yet.</p>'}</section>`;
   }
   if(draft.syncStatus==='locked')return`<section class="card"><h1>Submission locked</h1><p>${esc(draft.lastSyncError)}</p><button class="button" id="closeDraft">Back to matches</button></section>`;
-  return heading(`${draft.kind==='qualitative'?'Qualitative':'Quantitative'} · ${esc(draft.matchKey.toUpperCase())}`,`${teamLabel(draft.teamNumber)} · ${draft.alliance.toUpperCase()} · ${draft.eventKey}`)+
+  const assignmentIssue=kind==='quantitative'&&assignedOnly()?assignedRecordError(draft,context.matches,context.rotation):null;
+  if(assignmentIssue)return `<section class="card"><h1>Your assignment changed</h1><p>${esc(assignmentIssue)}</p><p>Your saved draft is still on this device. Ask an administrator to review it.</p><button class="button" id="closeDraft">Back to matches</button></section>`;
+  return (draft.kind==='quantitative'?robotBanner(draft):heading(`Qualitative · ${esc(draft.matchKey.toUpperCase())}`,`${esc(teamLabel(draft.teamNumber))} · ${draft.alliance.toUpperCase()} · ${draft.eventKey}`))+
     (draft.kind==='qualitative'?renderQualitative():renderQuantitative())+
     `<section class="card"><p>Saved locally · revision ${draft.revision} · ${esc(draft.syncStatus)}</p><div class="button-row split"><button class="button button-secondary" id="closeDraft">Save & return</button><button class="button button-primary" id="submitMatch">Submit & lock ${draft.kind==='qualitative'?'observation':'match'}</button></div></section>`;
 }
@@ -157,11 +174,11 @@ async function renderAdmin(){
   if(!offline){try{adminData={users:(await api('/admin/users')).users,rotations:event?(await api('/admin/rotations?'+new URLSearchParams({eventKey:event}))).rotations:[]};}catch(error){return`<section class="card">${esc(error.message)}</section>`;}}
   if(!adminData)return'<section class="card">Reconnect to manage events and rotations.</section>';
   draftRows=adminData.rotations.map(r=>({userId:String(r.user_id),rotation:r.rotation,rotationCount:r.rotation_count,alliance:r.alliance,station:r.station}));
-  return heading('Scouting administration','Import a 2026 event, then assign scouters to repeating qualification-match rotations.')+
+  return heading('Scouting administration','Import the TBA schedule. Assign each scouter a Red or Blue station for this event.')+
     `<section class="card"><a href="/admin">Manage user permissions</a><h2>Import / refresh TBA schedule</h2><form id="importEventForm" class="grid grid-2">${field('TBA event key','eventKey',event==='legacy'?'':event,'text','required pattern="2026[a-z0-9]+" placeholder="2026tnkn"')}${field('TBA Read API key (optional if configured on server)','apiKey','','password','autocomplete="off"')}<button class="button button-primary" ${offline?'disabled':''}>Import event, teams and matches</button></form><p>The key is used only for the import and is not saved in browser storage. Reimporting retains all scouting records.</p></section>`+
-    `<section class="card"><h2>Scouting rotations · ${esc(event||'choose an imported event')}</h2><p>With 2 groups: group 1 scouts qualification matches 1, 3, 5… and group 2 scouts 2, 4, 6… . Each slot assigns red/blue and station 1–3. Playoffs can be selected manually.</p><form id="rotationsForm"><label class="field">Total rotation groups<input name="rotationCount" type="number" min="1" max="100" value="${draftRows[0]?.rotationCount||1}" required></label><div class="table-wrap"><table><thead><tr><th>Scouter</th><th>Group</th><th>Alliance</th><th>Station</th><th></th></tr></thead><tbody id="rotationRows">${draftRows.map((r,i)=>rotationRow(r,i)).join('')}</tbody></table></div><div class="button-row"><button type="button" id="addRotation" class="button button-secondary">Add scouter</button><button class="button button-primary" ${offline||!event?'disabled':''}>Save rotations</button></div><p id="coverageNotice" class="section-help"></p></form></section>`;
+    `<section class="card"><span class="eyebrow">EVENT CREW</span><h2>Scout stations · ${esc(event||'choose an imported event')}</h2><p>One group scouts every qualification match. With 2 groups, group 1 scouts odd matches and group 2 scouts even matches. Quantitative-only users must follow their station; users with additional permissions retain manual selection.</p><form id="rotationsForm"><label class="field">Total rotation groups<input name="rotationCount" type="number" min="1" max="100" value="${draftRows[0]?.rotationCount||1}" required></label><div class="table-wrap"><table><thead><tr><th>Scouter</th><th>Group</th><th>Scout station</th><th></th></tr></thead><tbody id="rotationRows">${draftRows.map((r,i)=>rotationRow(r,i)).join('')}</tbody></table></div><div class="button-row"><button type="button" id="addRotation" class="button button-secondary">Add scouter</button><button class="button button-primary" ${offline||!event?'disabled':''}>Save scout stations</button></div><p id="coverageNotice" class="section-help"></p></form></section>`;
 }
-function rotationRow(r,i){return`<tr data-rotation-row="${i}"><td><select name="userId" required><option value="">Choose scouter</option>${adminData.users.map(u=>`<option value="${u.id}" ${u.id===r.userId?'selected':''}>${esc(u.email)}</option>`).join('')}</select></td><td><input name="rotation" type="number" min="1" max="100" value="${r.rotation||1}" required></td><td><select name="alliance">${options(['red','blue'],r.alliance||'red')}</select></td><td><select name="station">${[1,2,3].map(n=>`<option value="${n}" ${n===r.station?'selected':''}>${n}</option>`).join('')}</select></td><td><button type="button" class="mini-button danger" data-remove-rotation>Remove</button></td></tr>`;}
+function rotationRow(r,i){return`<tr data-rotation-row="${i}"><td><select name="userId" aria-label="Scouter" required><option value="">Choose scouter</option>${adminData.users.map(u=>`<option value="${u.id}" ${u.id===r.userId?'selected':''}>${esc(u.email)}</option>`).join('')}</select></td><td><input name="rotation" aria-label="Rotation group" type="number" min="1" max="100" value="${r.rotation||1}" required></td><td><select name="scoutStation" aria-label="Scout station">${['red','blue'].flatMap(a=>[1,2,3].map(n=>`<option value="${a}:${n}" ${a===(r.alliance||'red')&&n===(r.station||1)?'selected':''}>${a==='red'?'Red':'Blue'} scout ${n}</option>`)).join('')}</select></td><td><button type="button" class="mini-button danger" data-remove-rotation>Remove</button></td></tr>`;}
 async function renderSync(){const local=(await all()).filter(r=>r.ownerUserId===auth.user.id||can('sync'));return heading('Synchronization','Pending observations stay on this device until the server acknowledges their revision.')+`<section class="card"><button class="button button-primary" id="syncNow">Retry pending records</button><div class="table-wrap"><table><thead><tr><th>Event</th><th>Match / team</th><th>Type</th><th>Status</th><th>Resolution</th></tr></thead><tbody>${local.map(r=>`<tr><td>${esc(r.eventKey)}</td><td>${esc(r.matchKey||r.matchNumber)} / ${r.teamNumber}</td><td>${esc(r.kind||'quantitative')}</td><td>${esc(r.syncStatus)}<small class="error-text">${esc(r.lastSyncError||'')}</small></td><td>${r.syncStatus==='conflict'?`<button class="mini-button" data-server-version="${esc(r.recordId)}">Keep server version</button>${!r.completed?`<button class="mini-button" data-local-version="${esc(r.recordId)}">Retry local draft as newer</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div></section>`;}
 async function render(){
   const version=++viewVersion;shell();
@@ -177,6 +194,16 @@ async function render(){
   if(version!==viewVersion)return;$('#mainContent').innerHTML=eventPicker()+body;bind();
 }
 async function start(input){
+  if(route()!=='qualitative'&&assignedOnly()){
+    if(!event)throw new Error('Choose your assigned event first.');
+    let assigned;
+    if(!offline&&navigator.onLine){
+      assigned=await api('/assignment?'+new URLSearchParams({eventKey:event,matchNumber:input.matchNumber}));
+      await refreshContext();
+    }else assigned=resolveScoutAssignment(context.matches,context.rotation,Number(input.matchNumber));
+    if(assigned.error)throw new Error(assigned.error);
+    input={...assigned,eventKey:event,startingLocation:'Center'};
+  }
   const kind=route()==='qualitative'?'qualitative':'quantitative',eventKey=String(input.eventKey||event).trim().toLowerCase(),matchNumber=Number(input.matchNumber),teamNumber=Number(input.teamNumber);
   const candidate={...input,eventKey,matchNumber,teamNumber,kind,matchKey:input.matchKey||`qm${matchNumber}`};
   const local=(await all()).map(normalizeRecord);if(isLocked(candidate,local))throw new Error('You already submitted this match/team at this event.');
@@ -195,6 +222,8 @@ function guard(fn){return async e=>{try{await fn(e);}catch(error){toast(error.me
 function bind(){
   $('#eventPicker')?.addEventListener('change',guard(e=>selectEvent(e.target.value)));
   $('#startForm')?.addEventListener('submit',guard(async e=>{e.preventDefault();await start(Object.fromEntries(new FormData(e.currentTarget)));}));
+  $('#assignedStartForm')?.addEventListener('submit',guard(async e=>{e.preventDefault();const form=e.currentTarget,button=form.querySelector('button');button.disabled=true;try{await start(Object.fromEntries(new FormData(form)));}finally{button.disabled=false;}}));
+  $('#assignedMatchNumber')?.addEventListener('input',e=>{const assigned=resolveScoutAssignment(context.matches,context.rotation,Number(e.target.value));$('#assignmentPreview').innerHTML=assigned.error?`<p>${esc(assigned.error)}</p>`:robotBanner({...assigned,eventKey:event},true);});
   $$('[data-assigned]').forEach(b=>b.addEventListener('click',guard(async()=>{const a=context.assignments.find(m=>m.match_key===b.dataset.assigned);await start({eventKey:event,matchKey:a.match_key,matchNumber:a.match_number,teamNumber:a.teamNumber,alliance:a.alliance,startingLocation:'Center'});}))); 
   $$('[data-resume]').forEach(b=>b.addEventListener('click',guard(async()=>{draft=await get(b.dataset.resume);if(draft.ownerUserId!==auth.user.id||draft.completed)throw new Error('This record is locked');await render();})));
   $('#closeDraft')?.addEventListener('click',guard(async()=>{draft=null;await render();}));
@@ -224,7 +253,7 @@ function bind(){
   $('#importEventForm')?.addEventListener('submit',guard(async e=>{e.preventDefault();const form=e.currentTarget,body=Object.fromEntries(new FormData(form)),button=form.querySelector('button');button.disabled=true;try{const imported=await api('/admin/import-event',{method:'POST',body});form.elements.apiKey.value='';toast(`Imported ${imported.teams} teams and ${imported.matches} matches`);await selectEvent(imported.eventKey);}finally{button.disabled=false;}}));
   $('#addRotation')?.addEventListener('click',()=>$('#rotationRows').insertAdjacentHTML('beforeend',rotationRow({},Date.now())));
   $('#rotationRows')?.addEventListener('click',e=>{if(e.target.matches('[data-remove-rotation]'))e.target.closest('tr').remove();});
-  $('#rotationsForm')?.addEventListener('submit',guard(async e=>{e.preventDefault();const rotationCount=Number(e.currentTarget.elements.rotationCount.value),rotations=$$('#rotationRows tr').map(tr=>({userId:tr.querySelector('[name=userId]').value,rotation:Number(tr.querySelector('[name=rotation]').value),rotationCount,alliance:tr.querySelector('[name=alliance]').value,station:Number(tr.querySelector('[name=station]').value)}));await api('/admin/rotations',{method:'PUT',body:{eventKey:event,rotations}});toast(`Saved ${rotations.length} scouters. ${rotationCount*6-rotations.length} station/group slots are unassigned.`);await refreshContext();await render();}));
+  $('#rotationsForm')?.addEventListener('submit',guard(async e=>{e.preventDefault();const rotationCount=Number(e.currentTarget.elements.rotationCount.value),rotations=$$('#rotationRows tr').map(tr=>{const [alliance,station]=tr.querySelector('[name=scoutStation]').value.split(':');return{userId:tr.querySelector('[name=userId]').value,rotation:Number(tr.querySelector('[name=rotation]').value),rotationCount,alliance,station:Number(station)};});await api('/admin/rotations',{method:'PUT',body:{eventKey:event,rotations}});toast(`Saved ${rotations.length} scouters. ${rotationCount*6-rotations.length} station/group slots are unassigned.`);await refreshContext();await render();}));
   $('#syncNow')?.addEventListener('click',guard(async()=>{await syncAll();await refreshContext();await render();}));
   $$('[data-server-version]').forEach(b=>b.addEventListener('click',guard(async()=>{const record=await get(b.dataset.serverVersion);if(record.conflictServerRecord)await put({...record.conflictServerRecord,syncStatus:'synced'});await render();})));
   $$('[data-local-version]').forEach(b=>b.addEventListener('click',guard(async()=>{const record=await get(b.dataset.localVersion);if(record.completed)throw new Error('Submitted records cannot be changed');await put({...record,revision:Math.max(record.revision,record.conflictServerRecord?.revision||0)+1,conflictServerRecord:null,syncStatus:'pending'});await syncAll();await render();})));
