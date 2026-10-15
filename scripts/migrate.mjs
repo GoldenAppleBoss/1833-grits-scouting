@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { database, transaction, closeDatabase } from '../lib/db.mjs';
+import { transaction, closeDatabase } from '../lib/db.mjs';
+import { logFailure } from '../lib/diagnostics.mjs';
 if (process.env.MIGRATION_DATABASE_URL) process.env.DATABASE_URL = process.env.MIGRATION_DATABASE_URL;
 const directory = fileURLToPath(new URL('../supabase/migrations/', import.meta.url));
 try {
@@ -16,5 +17,5 @@ try {
     }
   });
   console.log('Supabase schema is current. Existing users and records are retained.');
-} catch (error) { console.error('Migration failed:', error.code || error.name); process.exitCode = 1; }
+} catch (error) { logFailure('Migration failed', error); process.exitCode = 1; }
 finally { await closeDatabase(); }

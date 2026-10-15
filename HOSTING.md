@@ -12,6 +12,39 @@ by importing the old database. Passwords remain Argon2 hashes and sessions stay
 in PostgreSQL. This implementation uses Supabase's **database**, not Supabase
 Auth: do not set up a second login or publish Supabase service keys in the browser.
 
+## Fix an immediate 503 on login or backend requests
+
+`DATABASE_URL` is required. The runtime connects directly to PostgreSQL using
+`pg`; it does not read `SUPABASE_JWT_SECRET`, `SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`,
+`NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Those API keys
+cannot be converted into a database password or connection string.
+
+1. In Supabase, open **Connect > Transaction pooler** and copy the PostgreSQL
+   URI. Replace the password placeholder with the **database password**, URL-encoded.
+2. In Vercel **Settings > Environment Variables**, add `DATABASE_URL` for
+   **Production**. Set it for Preview too if deploying previews, using the
+   appropriate preview database. Keep the actual URI private.
+3. Apply the application schema with `npm.cmd run db:migrate`, using a private
+   `.env.local` as described below. Alternatively, for a new database, run the
+   contents of `supabase/migrations/202610150001_tools.sql` in Supabase's SQL
+   Editor. Creating a Supabase project alone does not create these tables.
+4. Redeploy in Vercel so the function receives the new environment variables.
+5. Visit `/scouting/api/health`. A `200` with `"ok":true` confirms the database
+   connection and required application tables/columns can be read. Then sign up
+   and sign in. Accounts live in `shared_login.portal_users`, so accounts created
+   only in Supabase Auth cannot sign in here.
+
+Vercel builds reject a missing or malformed `DATABASE_URL` without connecting to
+the database. The health check reads no account data and makes no schema changes.
+Locally, `npm.cmd run db:check` checks the connection and schema using
+`DATABASE_URL`, matching the runtime rather than `MIGRATION_DATABASE_URL`.
+Database credentials, network access, and write privileges still need to be valid.
+Server logs include safe diagnostic codes and setup advice; browser error
+responses keep configuration details private. `42P01`/`42703` mean the schema
+needs migration, `28P01` means the database credentials failed, and
+`DATABASE_URL_MISSING` means the function has no connection string.
+
 ## 1. Create Supabase
 
 1. Sign up at [Supabase](https://supabase.com/dashboard), create an organization,
@@ -67,7 +100,9 @@ If importing Azure users/records, follow the optional migration section below
 
 ```powershell
 npm.cmd run db:migrate
+npm.cmd run db:check
 npm.cmd run check
+npm.cmd test
 npm.cmd run build
 ```
 
@@ -244,4 +279,4 @@ the last signed-in account. The server never trusts that snapshot; reconnecting
 rechecks live sessions and permissions before synchronizing. Sensitive APIs and
 portal pages are not cached by the service worker.
 
-This runtime-only export omits development tests and Docker files. See [SCRIPTS.md](SCRIPTS.md) for the included commands. The original repository retains the full test suite.
+Backend configuration and failure-path tests are included. See [SCRIPTS.md](SCRIPTS.md) for the included commands.
