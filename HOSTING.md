@@ -185,7 +185,7 @@ account's event station: Red scout 1/2/3 or Blue scout 1/2/3, in TBA alliance
 order. The page previews the robot and keeps its team number and alliance
 visible while scouting. Robot, alliance, event-key and playoff-key inputs are
 not offered to these accounts. An account without an event station or published
-match cannot begin a new observation. Starting location is chosen after starting.
+match cannot begin a new observation. Scouting begins directly in autonomous.
 
 Any permission in addition to `scouting:read` keeps manual robot and match
 selection, including playoffs and unscheduled matches. This override does not
@@ -235,10 +235,9 @@ in the existing Supabase database; new databases need their own configuration.
    submission locks. Playoffs use manual selection with the imported match key.
 
 No schedule yet? Users with additional permissions can start observations
-manually with a 2026 event key, match number/key, robot, alliance and starting
-location. Quantitative-only users need an imported schedule and an assigned
-station before they can start. Starting locations are team-defined
-Left/Center/Right choices while facing the field, not official scoring zones.
+manually with a 2026 event key, match number/key, robot and alliance.
+Quantitative-only users need an imported schedule and an assigned station before
+they can start.
 
 ## 6. Connect tools.team1833.org
 
@@ -289,16 +288,20 @@ fields such as passing counts remain unknown in legacy analytics, not zeros.
 
 ## Analytics and scoring conventions
 
-- Quantitative observations count active-hub fuel, passed fuel, observed cycles,
-  bump/trench crossings, starting location, status and tower levels.
-- Endgame fuel is a subset of teleop fuel. The stacked chart separates autonomous
-  points, teleop points before endgame, and endgame fuel plus tower points.
-- Point estimates use active-hub fuel at 1 point each, an autonomous Level 1
-  climb at 15, and teleop tower levels at 10/20/30. Passing and inactive-hub fuel
-  do not count as points. These are scouting estimates, not official match scores
-  or TBA OPR. [FIRST 2026 scoring reference](https://www.firstinspires.org/hubfs/web/volunteer/frc/2026-rebuilt-cheat-sheet.pdf?hsLang=en).
-- Cycle counts are observed inputs; estimated fuel per cycle is total active-hub
-  fuel divided by observed cycles. Zero cycles yields an unknown ratio.
+- Quantitative observations count active-hub fuel, passed fuel, bump/trench
+  crossings and robot status. Crossings have only +1 and -1 controls. Starting
+  location, climbing, manual cycle counts and separate endgame fuel are omitted.
+- Cycle estimates are computed per match as
+  `Math.trunc(0.9 * (autoBumpCrossings + autoTrenchCrossings + teleopBumpCrossings + teleopTrenchCrossings))`.
+  Team averages use those per-match estimates. Missing historical crossing
+  counts remain unknown. Historic observed cycle inputs are ignored.
+- Estimated fuel per cycle is total active-hub fuel divided by estimated cycles.
+  Zero or unknown estimated cycles yield an unknown ratio.
+- The stacked chart separates autonomous and full teleop fuel points. Point
+  estimates include active-hub fuel only, at one point each; historic climbing
+  data is ignored. Passing and inactive-hub fuel earn no points in these
+  estimates. Existing raw records are retained. These are scouting estimates,
+  not official match scores or TBA OPR.
 - Reliability is normal observations / all observed matches ×100. Multiple
   scouters observing the same robot/match count once, using the latest observation.
 - Analytics selects one event at a time, uses team names and numbers, and supports
@@ -317,3 +320,14 @@ rechecks live sessions and permissions before synchronizing. Sensitive APIs and
 portal pages are not cached by the service worker.
 
 Backend configuration and failure-path tests are included. See [SCRIPTS.md](SCRIPTS.md) for the included commands.
+
+## Brand assets
+
+The scouting theme uses the official site's bean blue `#1b97ad` and bean orange
+`#f34732`. The masthead [logo](https://www.team1833.org/wp-content/uploads/2024/09/Bean-Logo-White-Number.png),
+[favicon](https://www.team1833.org/wp-content/uploads/2024/09/favicon.png), and
+[Chewy font](https://www.team1833.org/wp-content/uploads/fonts/Chewy-Regular.ttf)
+were copied from [Team1833.org](https://www.team1833.org/) into `scouting/public`
+and are bundled/cached for offline use. Chewy's Apache 2.0 license is included
+in `CHEWY-LICENSE.txt`. Headings, navigation, main buttons and large numbers use
+Chewy; dense text keeps a standard sans-serif font for readability.

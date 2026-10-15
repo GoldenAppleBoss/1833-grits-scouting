@@ -63,7 +63,7 @@ export async function createTestServer() {
   }};
 }
 export function testRecord(edits={}) {
-  return {...Object.fromEntries(COUNTERS.map(k=>[k,0])),recordId:randomUUID(),deviceId:'test-device',schemaVersion:4,
+  return {...Object.fromEntries(COUNTERS.map(k=>[k,0])),recordId:randomUUID(),deviceId:'test-device',schemaVersion:5,
     eventKey:'2026test',matchKey:'qm1',matchNumber:1,teamNumber:1833,alliance:'red',kind:'quantitative',ownerUserId:'1',revision:1,
-    completed:false,startingLocation:'Center',robotStatus:'Normal',robotStatusPeriod:'',autoClimb:false,endgameLevel:0,tags:[],notes:'',...edits};
+    completed:false,robotStatus:'Normal',robotStatusPeriod:'',tags:[],notes:'',...edits};
 }

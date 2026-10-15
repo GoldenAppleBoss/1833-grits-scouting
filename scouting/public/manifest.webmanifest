@@ -5,14 +5,14 @@
   "start_url": "/scouting/#quantitative",
   "scope": "/scouting/",
   "display": "standalone",
-  "background_color": "#f2f6f7",
-  "theme_color": "#f34732",
+  "background_color": "#e6f6fa",
+  "theme_color": "#1b97ad",
   "icons": [
     {
-      "src": "/scouting/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "src": "/scouting/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

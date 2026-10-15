@@ -1,7 +1,6 @@
 // Pure shared rules used by browser, API and unit tests.
-export const COUNTERS = ['autoFuel','teleopFuel','endgameFuel','teleopInactiveFuel','autoPassed','teleopPassed','autoCycles','teleopCycles','autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings'];
+export const COUNTERS = ['autoFuel','teleopFuel','teleopInactiveFuel','autoPassed','teleopPassed','autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings'];
 export const STATUSES = ['Normal','No Show','Disabled','Disconnected','Immobilized / Stuck','Tipped','Mechanical Failure','Other Failure'];
-export const STARTS = ['Left','Center','Right'];
 export function eventKey(value) { return String(value || '').trim().toLowerCase(); }
 export function normalizeRecord(record) {
   return { ...record, eventKey: eventKey(record.eventKey) || 'legacy', matchKey: record.matchKey || `qm${record.matchNumber}`, kind: record.kind || 'quantitative', ownerUserId: record.ownerUserId == null ? null : String(record.ownerUserId) };
@@ -17,16 +16,12 @@ export function validateRecord(input) {
   if (typeof r.completed !== 'boolean') return 'completed must be a boolean';
   if (r.schemaVersion >= 4 && !['red','blue'].includes(r.alliance)) return 'Choose a red or blue alliance';
   if (r.kind === 'quantitative') {
-    if (r.schemaVersion >= 4 && !STARTS.includes(r.startingLocation)) return 'Choose a starting location';
     for (const key of COUNTERS) {
       if (r[key] != null && (!Number.isInteger(r[key]) || r[key] < 0 || r[key] > 100000)) return `${key} must be a nonnegative integer`;
       if (r.schemaVersion >= 4 && r[key] == null) return `${key} is required`;
     }
-    if (r.endgameFuel > r.teleopFuel) return 'Endgame fuel is a subset of teleop fuel';
     if (!STATUSES.includes(r.robotStatus)) return 'Choose a robot status';
     if (r.robotStatus === 'Normal' && r.robotStatusPeriod) return 'Normal robots do not need a failure period';
-    if (r.autoClimb != null && typeof r.autoClimb !== 'boolean') return 'Invalid autonomous climb';
-    if (r.endgameLevel != null && ![0,1,2,3].includes(r.endgameLevel)) return 'Invalid endgame level';
   }
   if ((r.notes != null && typeof r.notes !== 'string') || (r.notes || '').length > 8000 || !Array.isArray(r.tags || []) || (r.tags || []).some(t => typeof t !== 'string' || t.length > 40) || (r.tags || []).length > 20) return 'Keep notes under 8000 characters and use up to 20 short tags';
   return null;
@@ -62,6 +57,11 @@ export function assignments(matches, rotations, userId) {
 }
 const number = value => value == null || !Number.isFinite(Number(value)) ? null : Number(value);
 const sumFields = (r, fields) => fields.every(f => number(r[f]) !== null) ? fields.reduce((sum,f) => sum + Number(r[f]), 0) : null;
+const crossingFields = ['autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings'];
+export function estimatedCycles(record) {
+  const crossings = sumFields(record, crossingFields);
+  return crossings === null ? null : Math.trunc(0.9 * crossings);
+}
 export const METRICS = {
   autoFuel: { label:'Autonomous fuel', value:r => number(r.autoFuel) },
   teleopFuel: { label:'Teleop fuel (includes endgame)', value:r => number(r.teleopFuel) },
@@ -69,14 +69,15 @@ export const METRICS = {
   autoPassed: { label:'Fuel passed in autonomous', value:r => number(r.autoPassed) },
   teleopPassed: { label:'Fuel passed in teleop', value:r => number(r.teleopPassed) },
   totalPassed: { label:'Total fuel passed', value:r => sumFields(r,['autoPassed','teleopPassed']) },
-  cycles: { label:'Observed cycles', value:r => sumFields(r,['autoCycles','teleopCycles']) },
-  fuelPerCycle: { label:'Estimated fuel per cycle', value:r => { const cycles=sumFields(r,['autoCycles','teleopCycles']),fuel=sumFields(r,['autoFuel','teleopFuel']); return cycles>0&&fuel!==null ? fuel/cycles : null; } },
-  autoPoints: { label:'Estimated autonomous points', value:r => r.autoClimb == null || number(r.autoFuel) === null ? null : Number(r.autoFuel)+(r.autoClimb?15:0) },
-  teleopPoints: { label:'Estimated teleop points before endgame', value:r => number(r.endgameFuel) === null || number(r.teleopFuel) === null ? null : Number(r.teleopFuel)-Number(r.endgameFuel) },
-  endgamePoints: { label:'Estimated endgame points', value:r => r.endgameLevel == null || number(r.endgameFuel) === null ? null : Number(r.endgameFuel)+Number(r.endgameLevel)*10 },
-  estimatedPoints: { label:'Estimated total points', value:r => { const a=METRICS.autoPoints.value(r),t=METRICS.teleopPoints.value(r),e=METRICS.endgamePoints.value(r); return [a,t,e].every(v=>v!==null)?a+t+e:null; } },
+  cycles: { label:'Estimated cycles', value:estimatedCycles },
+  fuelPerCycle: { label:'Estimated fuel per cycle', value:r => { const cycles=estimatedCycles(r),fuel=sumFields(r,['autoFuel','teleopFuel']); return cycles>0&&fuel!==null ? fuel/cycles : null; } },
+  autoPoints: { label:'Estimated autonomous fuel points', value:r => number(r.autoFuel) },
+  teleopPoints: { label:'Estimated teleop fuel points', value:r => number(r.teleopFuel) },
+  estimatedPoints: { label:'Estimated fuel points', value:r => sumFields(r,['autoFuel','teleopFuel']) },
   reliability: { label:'Working as intended %', value:r => STATUSES.includes(r.robotStatus)?(r.robotStatus==='Normal'?100:0):null },
-  crossings: { label:'Bump + trench crossings', value:r => sumFields(r,['autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings']) }
+  bumpCrossings: { label:'Bump crossings', value:r => sumFields(r,['autoBumpCrossings','teleopBumpCrossings']) },
+  trenchCrossings: { label:'Trench crossings', value:r => sumFields(r,['autoTrenchCrossings','teleopTrenchCrossings']) },
+  crossings: { label:'Bump + trench crossings', value:r => sumFields(r,crossingFields) }
 };
 export function quantile(sorted, q) { if (!sorted.length) return null; const position=(sorted.length-1)*q,low=Math.floor(position); return sorted[low]+(sorted[Math.ceil(position)]-sorted[low])*(position-low); }
 export function statistics(values, { trim=0 }={}) {
