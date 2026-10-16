@@ -2,6 +2,8 @@ import { COUNTERS, STATUSES, METRICS, normalizeRecord, validateRecord, sameMatch
 import { renderBoxPlot, renderBubbleChart, renderBars } from './charts.js';
 import { accountRequest, settingsMarkup, bindSettings, downloadMatches } from './settings.js';
 import { oprMarkup, oprResults, rosterMarkup, rosterResults, reviewMarkup, reviewResults, entryResults } from './quality-ui.js';
+import { createQualitative } from './qualitative.js';
+import { createSelection } from './selection.js';
 
 const $=selector=>document.querySelector(selector), $$=selector=>[...document.querySelectorAll(selector)];
 const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
@@ -13,21 +15,24 @@ let remoteRecords=[],viewVersion=0,syncing=false,saveTimer,adminData=null,allian
 let draftRows=[];
 let settingsAccount=null,settingsTab='account',bubbleX='totalFuel',bubbleY='reliability',bubbleSize='matches';
 let qualityData={review:null,roster:null,entries:[]},ratingReport=null,oprWeight=.5,oprSort='adjusted',rosterSearch='',rosterSort='estimatedAccuracy',reviewThreshold=.85,reviewFilter='needs-review',reviewSearch='',entrySearch='';
+let qualLegacy=false;
 const can=p=>Boolean(auth?.user.permissions?.[p]);
 const assignedOnly=()=>auth?.user.manualScouting!==true;
-const route=()=>location.hash==='#profile'?'settings':['quantitative','qualitative','analytics','alliances','sync','admin','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'quantitative';
-const allowed=r=>r==='quantitative'||r==='settings'||(r==='qualitative'?can('qualitative'):r==='alliances'?can('alliances'):can(r));
-const title=r=>({quantitative:'Quantitative scouting',qualitative:'Qualitative scouting',analytics:'Event analytics',alliances:'Alliance hub',sync:'Synchronization',admin:'Scouting administration',profile:'Your account'})[r];
+const route=()=>location.hash==='#profile'?'settings':['quantitative','qualitative','analytics','alliances','selection','sync','admin','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'quantitative';
+const allowed=r=>r==='quantitative'||r==='settings'||(r==='selection'?can('alliances')||can('analytics')||can('admin'):r==='qualitative'?can('qualitative'):r==='alliances'?can('alliances'):can(r));
+const title=r=>({quantitative:'Quantitative scouting',qualitative:'Qualitative scouting',analytics:'Event analytics',alliances:'Alliance plans',selection:'Alliance selection',sync:'Synchronization',admin:'Scouting administration',profile:'Your account'})[r];
 const teamName=n=>context.teams.find(t=>Number(t.team_number)===Number(n))?.name||`Team ${n}`;
 const teamLabel=n=>`${n} · ${teamName(n)}`;
 const matchLabel=r=>r.match_key||r.matchKey||`qm${r.match_number||r.matchNumber}`;
 
-function openDb(){return new Promise((resolve,reject)=>{const request=indexedDB.open('team1833-scouting-portal-2026',1);request.onupgradeneeded=()=>{for(const [name,keyPath]of[['records','recordId'],['meta','key']])if(!request.result.objectStoreNames.contains(name))request.result.createObjectStore(name,{keyPath});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
+function openDb(){return new Promise((resolve,reject)=>{const request=indexedDB.open('team1833-scouting-portal-2026',2);request.onupgradeneeded=()=>{for(const [name,keyPath]of[['records','recordId'],['meta','key'],['qualitative','id'],['teamNotes','id']])if(!request.result.objectStoreNames.contains(name))request.result.createObjectStore(name,{keyPath});};request.onblocked=()=>reject(new Error('Close other scouting tabs, then reload to update local storage. Saved matches will be retained.'));request.onsuccess=()=>{request.result.onversionchange=()=>request.result.close();resolve(request.result);};request.onerror=()=>reject(request.error);});}
 function store(name,mode,work){return new Promise((resolve,reject)=>{const tx=db.transaction(name,mode),req=work(tx.objectStore(name));tx.oncomplete=()=>resolve(req.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
 const put=r=>store('records','readwrite',s=>s.put(r)), get=id=>store('records','readonly',s=>s.get(id)), all=()=>store('records','readonly',s=>s.getAll());
 const removeLocal=id=>store('records','readwrite',s=>s.delete(id));
 const meta=(key,value)=>store('meta','readwrite',s=>s.put({key,value}));
 async function readMeta(key){return(await store('meta','readonly',s=>s.get(key)))?.value;}
+const workflowHooks={state:()=>({auth,event,offline,context}),api,meta,readMeta,toast,records,refresh:refreshContext,allStore:name=>store(name,'readonly',s=>s.getAll()),putStore:(name,value)=>store(name,'readwrite',s=>s.put(value)),putRecord:put,legacy:async()=>{qualLegacy=true;await render();},weight:value=>{oprWeight=value;}};
+const qualitative=createQualitative(workflowHooks),selection=createSelection(workflowHooks);
 function toast(message){const el=document.createElement('div');el.className='toast';el.textContent=message;$('#toastHost').appendChild(el);setTimeout(()=>el.remove(),5000);}
 async function api(path,{method='GET',body,allowFailure=false}={}){
   const response=await fetch(API+path,{method,credentials:'same-origin',headers:{...(body?{'content-type':'application/json'}:{}),...(!['GET','HEAD'].includes(method)&&auth?.csrfToken?{'x-csrf-token':auth.csrfToken}:{})},body:body?JSON.stringify(body):undefined});
@@ -68,7 +73,7 @@ async function syncOne(record){
 }
 async function syncAll(){
   if(syncing||!auth||offline||!navigator.onLine)return;syncing=true;
-  try{for(const r of(await all()).filter(r=>['pending','failed','local'].includes(r.syncStatus)&&(r.ownerUserId===auth.user.id||can('sync'))))await syncOne(r);}
+  try{for(const r of(await all()).filter(r=>['pending','failed','local'].includes(r.syncStatus)&&(r.ownerUserId===auth.user.id||can('sync'))))await syncOne(r);await qualitative.syncPending();}
   finally{syncing=false;shell();}
 }
 function shell(){
@@ -76,7 +81,7 @@ function shell(){
   $('#syncBadge').hidden=!auth;$('#syncBadge').textContent=syncing?'Syncing…':'Local autosave';
   $('#profileArea').innerHTML=auth?`<a class="settings-button ${route()==='settings'?'active':''}" href="#settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.7 4.3 10.2 2h3.6l.5 2.3 1.8 1 2.2-.7 1.8 3.1-1.7 1.6v2.1l1.7 1.6-1.8 3.1-2.2-.7-1.8 1-.5 2.3h-3.6l-.5-2.3-1.8-1-2.2.7-1.8-3.1 1.7-1.6V9.3L3.9 7.7l1.8-3.1 2.2.7z" transform="translate(0 1)"/><circle cx="12" cy="11.5" r="3"/></svg></a>`:'';
   $('#mainNav').hidden=!auth;
-  $('#mainNav').innerHTML=auth?['quantitative','qualitative','analytics','alliances','sync','admin'].filter(allowed).map(r=>`<a class="${route()===r?'active':''}" href="#${r}">${title(r)}</a>`).join(''):'';
+  $('#mainNav').innerHTML=auth?['quantitative','qualitative','analytics','selection','alliances','sync','admin'].filter(allowed).map(r=>`<a class="${route()===r?'active':''}" href="#${r}">${title(r)}</a>`).join(''):'';
   $('#deviceLabel').textContent=auth?'2026 REBUILT · Team 1833':'';
 }
 function eventPicker(){
@@ -216,7 +221,7 @@ async function renderSettings(){
   return settingsMarkup(settingsAccount,{tab:settingsTab,offline,pending:local.filter(r=>!['synced','locked'].includes(r.syncStatus)).length,localCount:local.length});
 }
 async function exportMyMatches(){
-  const local=(await all()).filter(r=>r.ownerUserId===auth.user.id),remote=offline?[]:(await accountRequest('/matches')).matches,map=new Map();
+  const grouped=(await store('qualitative','readonly',s=>s.getAll())).filter(g=>g.ownerUserId===auth.user.id&&g.syncStatus!=='deleted').flatMap(g=>g.records.map(r=>({...r,syncStatus:g.syncStatus}))),local=[...(await all()).filter(r=>r.ownerUserId===auth.user.id),...grouped],remote=offline?[]:(await accountRequest('/matches')).matches,map=new Map();
   for(const match of [...remote,...local]){const previous=map.get(match.recordId);if(!previous||match.revision>=previous.revision)map.set(match.recordId,match);}
   downloadMatches([...map.values()]);
 }
@@ -225,18 +230,20 @@ async function clearMySchedules(){
   for(const entry of entries)if([`context:${auth.user.id}:`,`records:${auth.user.id}:`].some(prefix=>entry.key.startsWith(prefix)))await store('meta','readwrite',s=>s.delete(entry.key));
 }
 async function render(){
-  const version=++viewVersion;shell();
+  const version=++viewVersion;selection.stop();shell();
   if(!auth){$('#mainContent').innerHTML=`<section class="card"><h1>Sign in to Team BEAN Scouting</h1><p>Use your Team 1833 account. An administrator must assign your scouting access.</p><a class="button button-primary" href="/?return_to=%2Fscouting%2F">Shared sign in</a></section>`;return;}
   const r=route();let body;
   if(!allowed(r))body='<section class="card"><h1>Access required</h1><p>Ask a website administrator to grant access to this area.</p><a href="/">Your permissions</a></section>';
-  else if(['quantitative','qualitative'].includes(r))body=await renderScouting(r);
+  else if(r==='quantitative')body=await renderScouting(r);
+  else if(r==='qualitative')body=qualLegacy?'<button id="returnAllianceQual" class="button button-secondary">Back to alliance subjective scouting</button>'+await renderScouting(r):await qualitative.render();
+  else if(r==='selection')body=await selection.render();
   else if(r==='analytics')body=await renderAnalytics(version);
   else if(r==='alliances')body=await renderAlliances();
   else if(r==='admin')body=await renderAdmin(version);
   else if(r==='sync')body=await renderSync();
   else if(r==='settings')body=await renderSettings();
   else body=`<section class="card"><h1>${esc(auth.user.email)}</h1><p>All accounts and permissions are managed by the shared portal.</p><a href="/">Your account</a><button id="signOut" class="button">Sign out</button></section>`;
-  if(version!==viewVersion)return;$('#mainContent').innerHTML=(r==='settings'?'':eventPicker())+body;bind();
+  if(version!==viewVersion)return;$('#mainContent').innerHTML=(r==='settings'?'':eventPicker())+body;bind();if(r==='qualitative'&&!qualLegacy)qualitative.bind();if(r==='selection')selection.bind();
 }
 async function start(input){
   if(route()!=='qualitative'&&assignedOnly()){
@@ -293,6 +300,7 @@ function bindQuality(){
 async function persistAnalysis(){await meta(`analysis:${auth.user.id}:${event}`,analysisOptions);await render();}
 function guard(fn){return async e=>{try{await fn(e);}catch(error){toast(error.message);}};}
 function bind(){
+  $('#returnAllianceQual')?.addEventListener('click',guard(async()=>{qualLegacy=false;await render();}));
   if(route()==='settings')bindSettings($('#mainContent'),{account:settingsAccount,changeTab:async tab=>{settingsTab=tab;await render();},refresh:async(load=true)=>{if(load)settingsAccount=null;await render();},notify:toast,onSync:syncAll,onExport:exportMyMatches,onClear:clearMySchedules,onNameChange:body=>{auth.user.firstName=body.firstName;auth.user.lastName=body.lastName;auth.user.name=body.firstName+' '+body.lastName;}});
   $('#eventPicker')?.addEventListener('change',guard(e=>selectEvent(e.target.value)));
   $('#startForm')?.addEventListener('submit',guard(async e=>{e.preventDefault();await start(Object.fromEntries(new FormData(e.currentTarget)));}));

@@ -1,4 +1,5 @@
 // Pure shared rules used by browser, API and unit tests.
+import { qualitativeError } from './qualitative-model.js';
 export const COUNTERS = ['autoFuel','teleopFuel','autoPassed','teleopPassed','autoBumpCrossings','autoTrenchCrossings','teleopBumpCrossings','teleopTrenchCrossings'];
 export const STATUSES = ['Normal','No Show','Disabled','Disconnected','Immobilized / Stuck','Tipped','Mechanical Failure','Other Failure'];
 export function eventKey(value) { return String(value || '').trim().toLowerCase(); }
@@ -23,6 +24,7 @@ export function validateRecord(input) {
     if (!STATUSES.includes(r.robotStatus)) return 'Choose a robot status';
     if (r.robotStatus === 'Normal' && r.robotStatusPeriod) return 'Normal robots do not need a failure period';
   }
+  if(r.kind==='qualitative'){const error=qualitativeError(r);if(error)return error;}
   if ((r.notes != null && typeof r.notes !== 'string') || (r.notes || '').length > 8000 || !Array.isArray(r.tags || []) || (r.tags || []).some(t => typeof t !== 'string' || t.length > 40) || (r.tags || []).length > 20) return 'Keep notes under 8000 characters and use up to 20 short tags';
   return null;
 }

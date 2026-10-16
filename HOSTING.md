@@ -456,6 +456,73 @@ References: [TBA API v3](https://www.thebluealliance.com/apidocs/v3),
 [NumPy least squares](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html),
 [Vercel Python file functions](https://vercel.com/docs/functions/runtimes/python/api-directory).
 
+## Qualitative scouting and shared alliance selection
+
+Migration `202610160005_qualitative_selection.sql` adds private event notes,
+selection workspaces, operation history and presence. Apply it before deploying
+this version. Existing matches, accounts and permissions are retained.
+
+Qualitative scouting now has **Alliance subjective scouting**, **Team notes**
+and **Team insights** tabs. Choose a scheduled match and alliance to load all
+three robots. Overall contribution ranks 1–3 are required; agility, field
+awareness and driver ability may stay unobserved. Ranks are relative within
+that alliance, and each rank can be used once per skill. Tags, stars, no-show,
+incapacitated, defense effectiveness, notes and significant updates accompany
+the rankings. The server submits all three observations atomically. Previously
+submitted robot observations remain locked, with the existing administrator
+deletion/rescout workflow. Older single-robot notes and drafts are still
+available through the compatibility button.
+
+Team notes can be event-wide or tied to a scheduled match. Submitted notes are
+immutable and retry-safe; add a significant update rather than replacing the
+historical observation. Insights and selection summaries retain written
+evidence, authors, match keys, stars, status flags and defense distributions.
+No auton pathing, manual cycle inputs, starting positions or climbing were added.
+
+**Alliance selection** is separate from both scouting and **Alliance plans**.
+Its shared board defaults to eight rows with captain, first pick and second
+pick columns. Add the fourth/third-pick column for Worlds-style planning.
+Rows can be configured from 1–16. Choose an available robot and click a slot,
+or select a slot and type the team number. Moves, swaps, clearing, pool
+availability flags and CSV export are supported without duplicate board teams.
+
+Shared picklists support custom names/descriptions, eight configurable metric
+columns, add/remove, drag or arrow ordering, direct positions, metric ordering,
+per-robot planning notes, discussion, duplication, deletion and CSV export.
+Picked teams retain their list positions with alliance labels and can be hidden
+from the view. Searching by name/number and pressing Enter or choosing a result
+opens a team overview with both qualitative and quantitative evidence.
+
+`scouting:alliances` (shown as **Alliance plans and shared selection editing**)
+grants collaboration/editing. `scouting:analytics` grants viewing. Scouting and
+portal administrators can also edit selection. Qualitative entry still requires
+`scouting:qualitative`; quantitative-only users gain no selection access.
+
+Live collaboration uses short authenticated polling and PostgreSQL transactions;
+there is no new service or public Supabase key. Visible workspaces refresh shared
+state every two seconds, presence every 15 seconds, and scouting summaries every
+30 seconds. All changes are server operations, not whole-list client saves.
+Expected slot contents, source positions, list revisions and prior note text
+prevent accidental overwrite. Undo works only for the latest shared revision.
+Operation IDs prevent duplicate effects after a lost response. Pending
+confirmations can be retried safely, and new shared edits are disabled offline.
+
+Fuel OPR uses the existing NumPy function and the analytics account/event weight,
+defaulting to 50/50. Passing OPR is the one-hot least-squares estimate of observed
+qualification fuel passed. It can be calculated from the imported schedule and
+scouting entries before official scores are pulled. Other summary metrics use
+current event scouting data; no-data values stay unknown, with neutral colors
+when no relative benchmark is available.
+
+IndexedDB version 2 adds `qualitative` and `teamNotes` stores while retaining
+existing `records` and `meta`. Close older scouting tabs if an upgrade is blocked,
+then reload; saved matches are not deleted. Qualitative drafts and submitted
+work queue offline and synchronize when connectivity returns. Shared board/list
+snapshots can be viewed offline, but new shared edits require a connection.
+
+See [the BeanScout feature review](docs/beanscout-review.md) for the complete
+source feature inventory, integration decisions and validation coverage.
+
 ## Brand assets
 
 The scouting theme uses the official site's bean blue `#1b97ad` and bean orange

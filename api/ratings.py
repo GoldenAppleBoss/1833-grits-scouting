@@ -61,7 +61,7 @@ def official_fit(matches, teams):
     return {t: float(x[i]) for i, t in enumerate(teams) if appearances[t]}, rank, independent, appearances
 
 
-def scouting_fit(records, teams):
+def scouting_fit(records, teams, fields=("autoFuel", "teleopFuel")):
     # Each observation measures one robot. Its one-hot least-squares design
     # gives its mean measured contribution, without inventing missing allies.
     positions = {t: i for i, t in enumerate(teams)}
@@ -69,10 +69,12 @@ def scouting_fit(records, teams):
     for r in latest_records(records).values():
         if not r["matchKey"].startswith("qm") or r["teamNumber"] not in positions:
             continue
+        if any(not isinstance(r.get(k), int) or isinstance(r.get(k), bool) or r[k] < 0 for k in fields):
+            continue
         row = np.zeros(len(teams))
         row[positions[r["teamNumber"]]] = 1
         a.append(row)
-        b.append(r["autoFuel"] + r["teleopFuel"])
+        b.append(sum(r[k] for k in fields))
         counts[r["teamNumber"]] += 1
     x, _, _ = least_squares(a, b, len(teams))
     return {t: float(x[i]) for i, t in enumerate(teams) if counts[t]}, counts
@@ -104,15 +106,17 @@ def holdout_report(matches, records, teams):
 
 def opr_report(data):
     matches = data.get("matches", [])
-    scheduled = {(m["key"], t) for m in matches if m["level"] == "qm" for s in m["alliances"].values() for t in s["teams"]}
+    schedule = data.get("schedule", matches)
+    scheduled = {(m["key"], t) for m in schedule if m["level"] == "qm" for s in m["alliances"].values() for t in s["teams"]}
     records = [r for r in data.get("records", []) if (r["matchKey"], r["teamNumber"]) in scheduled]
     teams = sorted({int(t["team_number"]) for t in data.get("teams", [])}
-                   | {t for m in matches for s in m["alliances"].values() for t in s["teams"]})
+                   | {t for m in schedule for s in m["alliances"].values() for t in s["teams"]})
     official, rank, independent, appearances = official_fit(matches, teams)
     scout, counts = scouting_fit(records, teams)
+    passing, _ = scouting_fit(records, teams, ("autoPassed", "teleopPassed"))
     names = {int(t["team_number"]): t["name"] for t in data.get("teams", [])}
     rows = [{"teamNumber": t, "name": names.get(t, f"Team {t}"), "scoutingOPR": scout.get(t),
-             "tbaFuelOPR": official.get(t), "tbaOverallOPR": data.get("oprs", {}).get(f"frc{t}"),
+             "tbaFuelOPR": official.get(t), "scoutingPassingOPR": passing.get(t), "tbaOverallOPR": data.get("oprs", {}).get(f"frc{t}"),
              "matches": counts[t], "officialMatches": appearances[t], "independent": bool(independent[i])}
             for i, t in enumerate(teams)]
     return {"teams": rows, "rank": rank, "teamCount": len(official), "updatedAt": data.get("updatedAt"),
@@ -201,7 +205,7 @@ def load_authenticated_data(cookie_header, event, mode):
             raise AccessError(401, "Authentication required")
         permissions = set(identity["permissions"])
         admin = bool(permissions & {"portal:admin", "scouting:manage"})
-        if "scouting:read" not in permissions or (mode == "roster" and not admin) or (mode == "opr" and not admin and "scouting:analytics" not in permissions):
+        if "scouting:read" not in permissions or (mode == "roster" and not admin) or (mode == "opr" and not admin and not permissions & {"scouting:analytics", "scouting:alliances"}):
             raise AccessError(403, "Scouting administrator access required" if mode == "roster" else "Analytics access required")
         saved = conn.execute("SELECT payload,updated_at FROM scouting.event_scores WHERE event_key=%s", (event,)).fetchone()
         data = dict(saved["payload"]) if saved else {"matches": []}
@@ -211,6 +215,8 @@ def load_authenticated_data(cookie_header, event, mode):
             data["records"].append({**r["payload"], "eventKey": r["event_key"], "matchKey": r["match_key"], "kind": r["kind"],
                                     "ownerUserId": r["owner_user_id"], "serverReceivedAt": r["server_received_at"].isoformat()})
         data["teams"] = conn.execute("SELECT team_number,name FROM scouting.teams WHERE event_key=%s ORDER BY team_number", (event,)).fetchall()
+        data["schedule"] = [{"key": m["match_key"], "level": m["comp_level"], "alliances": {"red": {"teams": m["red"]}, "blue": {"teams": m["blue"]}}}
+                            for m in conn.execute("SELECT match_key,comp_level,red,blue FROM scouting.matches WHERE event_key=%s", (event,))]
         data["users"] = conn.execute("""SELECT u.id::text,u.email,COALESCE(NULLIF(trim(u.first_name||' '||u.last_name),''),u.email) AS name
             FROM shared_login.portal_users u WHERE EXISTS(SELECT 1 FROM scouting.rotations r WHERE r.event_key=%s AND r.user_id=u.id)
             OR EXISTS(SELECT 1 FROM scouting.records r WHERE r.event_key=%s AND r.owner_user_id=u.id) ORDER BY name""", (event,event)).fetchall() if mode == "roster" else []

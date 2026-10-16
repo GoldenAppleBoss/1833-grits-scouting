@@ -70,6 +70,24 @@ class RatingsTests(unittest.TestCase):
         self.assertEqual(six["matches"], 0)
         self.assertEqual(six["officialMatches"], 19)
 
+    def test_passing_opr_uses_robot_observations_before_official_scores_are_pulled(self):
+        data = fixture()
+        data["schedule"] = data["matches"]
+        data["matches"] = []
+        for r in data["records"]:
+            r["autoPassed"] = 2
+            r["teleopPassed"] = 3*r["teamNumber"]
+        row = ratings.opr_report(data)["teams"][0]
+        self.assertAlmostEqual(row["scoutingPassingOPR"], 5)
+        self.assertAlmostEqual(row["scoutingOPR"], 20)
+        self.assertIsNone(row["tbaFuelOPR"])
+
+    def test_alliance_editors_can_read_team_opr_without_reading_admin_roster(self):
+        with AuthenticationTests().fake_database(["scouting:read", "scouting:alliances"]):
+            self.assertEqual(ratings.load_authenticated_data("team1833_session=token", "2026test", "opr")["records"], [])
+            with self.assertRaises(ratings.AccessError):
+                ratings.load_authenticated_data("team1833_session=token", "2026test", "roster")
+
     def test_duplicates_use_latest_complete_observation(self):
         records = [robot("qm1", 1, 1, 10, 20)]
         duplicate = {**records[0], "recordId": "new", "autoFuel": 30, "submittedAt": "2026-10-16T12:00:00Z"}
