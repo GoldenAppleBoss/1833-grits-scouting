@@ -11,9 +11,10 @@
         "build": "node scripts/build.mjs",
         "test": "node --test",
         "db:check": "node --env-file-if-exists=.env.local scripts/check-db.mjs",
-        "check": "node --check api/index.mjs && node --check lib/db.mjs && node --check lib/diagnostics.mjs && node --check lib/assignments.mjs && node --check lib/account.mjs && node --check lib/portal.mjs && node --check lib/scouting.mjs && node --check scouting/public/settings.js && node --check scouting/public/account-page.js && node --check scouting/public/theme.js && node --check scouting/public/charts.js && node --check scouting/public/app.js && node --check scouting/public/model.js && node --check scripts/build.mjs && node --check scripts/check-db.mjs && node --check scripts/migrate.mjs",
+        "check": "node --check api/index.mjs && node --check lib/db.mjs && node --check lib/diagnostics.mjs && node --check lib/assignments.mjs && node --check lib/account.mjs && node --check lib/portal.mjs && node --check lib/scouting.mjs && node --check scouting/public/settings.js && node --check scouting/public/account-page.js && node --check scouting/public/theme.js && node --check scouting/public/charts.js && node --check scouting/public/app.js && node --check scouting/public/model.js && node --check scripts/build.mjs && node --check scripts/check-db.mjs && node --check scripts/migrate.mjs && node --check lib/quality.mjs && node --check scouting/public/quality-ui.js && node --check scripts/verify-ratings.mjs",
         "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
-        "admin:grant": "node --env-file-if-exists=.env.local scripts/grant-admin.mjs"
+        "admin:grant": "node --env-file-if-exists=.env.local scripts/grant-admin.mjs",
+        "test:ratings": "node scripts/verify-ratings.mjs"
     },
     "dependencies": {
         "@node-rs/argon2": "^2.0.2",

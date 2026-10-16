@@ -358,6 +358,104 @@ their server copies online, retaining the latest revision; offline it exports
 the local matches only. No database table or API field names were renamed, so
 existing devices and historical matches remain compatible.
 
+## Match review, deletions and NumPy ratings
+
+Apply `202610160004_match_review.sql` before deploying this version. It adds an
+official-score snapshot and a private deletion audit; existing matches are
+retained. The normal `npm run db:migrate` command applies pending migrations.
+
+Scouting administration includes a **Scouting roster** directly below station
+rotations, a **Bad matches & rescout queue**, and searchable **All match entries**.
+Use **Pull every match score from TBA** after importing an event. This fetches
+the full event matches endpoint and overall OPRs using the configured server
+TBA key. Results include qualifications and playoffs; unpublished or invalid
+breakdowns stay unknown. Pull again after additional matches finish or official
+scores are corrected. Reviewing, deleting and pulling require `portal:admin`
+or `scouting:manage`; extra analytics/qualitative permissions alone do not grant
+these powers. Mutations require the current session and CSRF token.
+
+For each alliance, the latest submitted quantitative entry for each scheduled
+robot is selected by server receipt time. Alternatives remain visible without
+being added twice. Missing observations are shown separately from inaccurate
+observations. Complete three-robot sums are compared against TBA's 2026
+`score_breakdown.{red,blue}.hubScore.autoPoints`, `teleopPoints`, and
+`totalPoints`. These count scoring fuel only; tower and foul points never enter
+the comparison. Transition and endgame scoring fuel belong to teleop, without
+adding a separate endgame input.
+
+Accuracy is `max(0, 1 - abs(scouted - official) / max(official, 1))`.
+A match is flagged if either alliance fails any of the three checks. The default
+cutoff is 85%, adjustable from 80–90% and saved per account/event on the device.
+An official zero passes only with a scouting zero. Mismatched autonomous and
+teleop counts cannot cancel out just because their total agrees.
+
+An administrator can delete a draft, submitted quantitative entry, or qualitative
+entry after reviewing its identity and giving a reason. The deleted payload,
+actor, reason and timestamp are retained privately. Its ID is permanently
+tombstoned: replaying an offline copy receives HTTP 410. The app removes known
+deleted IDs from local storage on refresh. A new observation with a new ID can
+rescout the robot/match; the schedule and other observers' entries stay intact.
+
+The roster uses NumPy nonnegative least squares to estimate individual error
+contributions to the worst relative fuel error in each complete alliance.
+Its design matrix contains one-third per observed robot attributed to each
+scouter. Accuracy is `100 * max(0, 1 - fitted_error)`. At least three alliance
+comparisons and an independently identifiable matrix column are required for
+an individual estimate. Fixed crews cannot separate three people's mistakes;
+those rows show observed crew agreement, with explicit crew-only status. Roster
+search, sortable columns, percentile colors and scouter-to-entry inspection
+follow the analytics leaderboard. Counts represent alliance comparisons, not
+independent measurements of robot-level truth. This model cannot reveal
+offsetting errors hidden inside a correct alliance sum.
+
+**Analytics → Adjusted OPR** implements the proposed weighted combination with
+a 50/50 default and a 0–100% scouting-weight slider. The blend is
+`weight * scouting_fuel_OPR + (1 - weight) * TBA_fuel_OPR`. NumPy fits official
+qualification alliance fuel totals to the alliance/team incidence matrix.
+Scouting uses a one-hot robot observation matrix, equivalent to each team's
+mean measured fuel contribution. Only scheduled qualification observations
+enter the fit. Missing estimates stay unknown except at the pure-source slider
+endpoints. TBA's standard overall OPR is displayed separately: it includes
+other scoring categories and cannot meaningfully be averaged with fuel counts.
+Rank-deficient official schedules are labeled provisional.
+
+Chronological validation fits the first 70% of played qualification matches and
+predicts the remaining 30%, using only teams covered by both training sources.
+The selected blend, TBA-only and scouting-only mean absolute errors use the same
+held-out alliances. Insufficient coverage is explained; improvement is never
+assumed or promised. Manual analytics sample exclusions do not alter these fits.
+
+Vercel builds the existing Node function and `api/ratings.py` as separate functions.
+The explicit `/scouting/api/ratings` rewrite must remain before the general
+scouting rewrite. `.python-version` selects Python 3.12 and `requirements.txt`
+pins NumPy and psycopg. The Python function authenticates the same hashed
+`team1833_session` cookie directly against PostgreSQL and checks live permissions.
+It is read-only, has no public secret, and uses the existing `DATABASE_URL`.
+No new Vercel environment variable or email service is needed.
+
+For local development, install the Python dependencies in a virtual environment
+and set `PYTHON_EXECUTABLE` to its interpreter (or activate it). For example,
+in PowerShell:
+
+```powershell
+py -3.12 -m venv .local/ratings-python
+.\.local\ratings-python\Scripts\python.exe -m pip install -r requirements.txt
+$env:PYTHON_EXECUTABLE = (Resolve-Path .local\ratings-python\Scripts\python.exe).Path
+npm run test:ratings
+npm run dev
+```
+
+The local Node ratings route runs the same Python math over stdin. It never
+requires production credentials for numerical tests. `npm test` covers match
+review, permissions, deletion audits, offline replay rejection and rescouting
+with an isolated PostgreSQL database. `npm run test:ratings` additionally covers
+numerical recovery, duplicate handling, rank deficiency, missing data,
+chronological holdout leakage and Python authorization.
+
+References: [TBA API v3](https://www.thebluealliance.com/apidocs/v3),
+[NumPy least squares](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html),
+[Vercel Python file functions](https://vercel.com/docs/functions/runtimes/python/api-directory).
+
 ## Brand assets
 
 The scouting theme uses the official site's bean blue `#1b97ad` and bean orange

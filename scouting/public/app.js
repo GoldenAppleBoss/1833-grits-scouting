@@ -1,6 +1,7 @@
 import { COUNTERS, STATUSES, METRICS, normalizeRecord, validateRecord, sameMatch, teamAnalytics, searchTeams, percentile, resolveScoutAssignment, assignedRecordError } from './model.js';
 import { renderBoxPlot, renderBubbleChart, renderBars } from './charts.js';
 import { accountRequest, settingsMarkup, bindSettings, downloadMatches } from './settings.js';
+import { oprMarkup, oprResults, rosterMarkup, rosterResults, reviewMarkup, reviewResults, entryResults } from './quality-ui.js';
 
 const $=selector=>document.querySelector(selector), $$=selector=>[...document.querySelectorAll(selector)];
 const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
@@ -11,6 +12,7 @@ let db,auth=null,offline=false,events=[],event='',context={teams:[],matches:[],a
 let remoteRecords=[],viewVersion=0,syncing=false,saveTimer,adminData=null,allianceData=[],analysisOptions={},search='',metric='totalFuel',view='leaderboard',selectedMatch=null;
 let draftRows=[];
 let settingsAccount=null,settingsTab='account',bubbleX='totalFuel',bubbleY='reliability',bubbleSize='matches';
+let qualityData={review:null,roster:null,entries:[]},ratingReport=null,oprWeight=.5,oprSort='adjusted',rosterSearch='',rosterSort='estimatedAccuracy',reviewThreshold=.85,reviewFilter='needs-review',reviewSearch='',entrySearch='';
 const can=p=>Boolean(auth?.user.permissions?.[p]);
 const assignedOnly=()=>auth?.user.manualScouting!==true;
 const route=()=>location.hash==='#profile'?'settings':['quantitative','qualitative','analytics','alliances','sync','admin','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'quantitative';
@@ -23,6 +25,7 @@ const matchLabel=r=>r.match_key||r.matchKey||`qm${r.match_number||r.matchNumber}
 function openDb(){return new Promise((resolve,reject)=>{const request=indexedDB.open('team1833-scouting-portal-2026',1);request.onupgradeneeded=()=>{for(const [name,keyPath]of[['records','recordId'],['meta','key']])if(!request.result.objectStoreNames.contains(name))request.result.createObjectStore(name,{keyPath});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
 function store(name,mode,work){return new Promise((resolve,reject)=>{const tx=db.transaction(name,mode),req=work(tx.objectStore(name));tx.oncomplete=()=>resolve(req.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
 const put=r=>store('records','readwrite',s=>s.put(r)), get=id=>store('records','readonly',s=>s.get(id)), all=()=>store('records','readonly',s=>s.getAll());
+const removeLocal=id=>store('records','readwrite',s=>s.delete(id));
 const meta=(key,value)=>store('meta','readwrite',s=>s.put({key,value}));
 async function readMeta(key){return(await store('meta','readonly',s=>s.get(key)))?.value;}
 function toast(message){const el=document.createElement('div');el.className='toast';el.textContent=message;$('#toastHost').appendChild(el);setTimeout(()=>el.remove(),5000);}
@@ -44,21 +47,24 @@ async function refreshContext(){
     if(!event)event=await readMeta('selectedEvent')||events[0]?.event_key||'';
     if(event&&!/^(2026[a-z0-9]+|legacy)$/.test(event))event='';
     if(event){context=await api('/context?'+new URLSearchParams({eventKey:event}));await meta(`context:${auth.user.id}:${event}`,context);}
+    for(const id of context.deletedRecordIds||[]){await removeLocal(id);if(draft?.recordId===id)draft=null;}
     if(event&&(can('analytics')||can('sync')))remoteRecords=(await api('/records?'+new URLSearchParams({eventKey:event}))).records;
     if(event&&can('qualitative')){const observations=(await api('/qualitative?'+new URLSearchParams({eventKey:event}))).records;remoteRecords.push(...observations.filter(r=>!remoteRecords.some(old=>old.recordId===r.recordId)));}
     if(event)await meta(`records:${auth.user.id}:${event}`,remoteRecords);
   }catch(error){const cached=event?await readMeta(`context:${auth.user.id}:${event}`):null;if(cached)context=cached;if(!error.status&&event)remoteRecords=await readMeta(`records:${auth.user.id}:${event}`)||[];if(error.status)toast(error.message);}
   analysisOptions=await readMeta(`analysis:${auth.user.id}:${event}`)||{};
+  oprWeight=await readMeta(`oprWeight:${auth.user.id}:${event}`)??.5;
+  reviewThreshold=await readMeta(`reviewThreshold:${auth.user.id}:${event}`)??.85;
   shell();
 }
-async function records(){const local=(await all()).map(normalizeRecord).filter(r=>r.eventKey===event&&(r.ownerUserId===auth?.user.id||can('analytics')||can('sync'))),map=new Map();for(const r of [...remoteRecords,...context.completed,...local]){const old=map.get(r.recordId);if(!old||r.revision>=old.revision)map.set(r.recordId,r);}return[...map.values()];}
+async function records(){const deleted=new Set(context.deletedRecordIds||[]),local=(await all()).map(normalizeRecord).filter(r=>r.eventKey===event&&(r.ownerUserId===auth?.user.id||can('analytics')||can('sync'))),map=new Map();for(const r of [...remoteRecords,...context.completed,...local]){if(deleted.has(r.recordId))continue;const old=map.get(r.recordId);if(!old||r.revision>=old.revision)map.set(r.recordId,r);}return[...map.values()];}
 function isLocked(candidate,local){return [...local,...context.completed].some(r=>r.completed&&String(r.ownerUserId)===auth.user.id&&sameMatch(r,candidate));}
 async function saveDraft(){if(!draft||draft.completed)return;draft.revision++;draft.updatedAt=now();draft.syncStatus='pending';draft.lastSyncError=null;await put(draft);clearTimeout(saveTimer);saveTimer=setTimeout(()=>syncAll(),1800);shell();}
 async function syncOne(record){
   if(offline||!navigator.onLine||!auth?.csrfToken)return;
   if(record.ownerUserId!==auth.user.id&&!can('sync'))return;
   try{const result=await api('/sync',{method:'POST',body:{record}});const latest=await get(record.recordId);if(latest?.revision===record.revision){const updated={...latest,syncStatus:'synced',lastSyncError:null};await put(updated);if(draft?.recordId===record.recordId)draft=updated;}return result;}
-  catch(error){const latest=await get(record.recordId);if(latest?.revision!==record.revision)return;const updated={...latest,syncStatus:error.status===423?'locked':error.status===409?'conflict':'failed',lastSyncError:error.message,conflictServerRecord:error.payload?.serverRecord||null};await put(updated);if(draft?.recordId===record.recordId)draft=updated;}
+  catch(error){if(error.status===410){await removeLocal(record.recordId);remoteRecords=remoteRecords.filter(r=>r.recordId!==record.recordId);context.completed=context.completed.filter(r=>r.recordId!==record.recordId);if(draft?.recordId===record.recordId)draft=null;toast(error.message);return;}const latest=await get(record.recordId);if(latest?.revision!==record.revision)return;const updated={...latest,syncStatus:error.status===423?'locked':error.status===409?'conflict':'failed',lastSyncError:error.message,conflictServerRecord:error.payload?.serverRecord||null};await put(updated);if(draft?.recordId===record.recordId)draft=updated;}
 }
 async function syncAll(){
   if(syncing||!auth||offline||!navigator.onLine)return;syncing=true;
@@ -143,11 +149,18 @@ function chart(teams){
   if(view==='bubble')return renderBubbleChart(teams,bubbleX,bubbleY,bubbleSize);
   return renderBars(teams,metric,{stacked:view==='bar'});
 }
-async function renderAnalytics(){
+async function renderAnalytics(version){
   if(!METRICS[metric])metric='totalFuel';
   const teams=await analyticsTeams(),filtered=searchTeams(teams,search).sort((a,b)=>(b.metrics[metric].mean??-Infinity)-(a.metrics[metric].mean??-Infinity));
   const keys=['totalFuel','totalPassed','cycles','reliability'];
-  const choices=[['leaderboard','Leaderboard'],['comparison','Bar chart'],['box','Box plot'],['bubble','Bubble chart'],['bar','Fuel breakdown']];
+  const choices=[['leaderboard','Leaderboard'],['comparison','Bar chart'],['box','Box plot'],['bubble','Bubble chart'],['bar','Fuel breakdown'],['opr','Adjusted OPR']];
+  if(view==='opr'){
+    const selectedEvent=event,userId=auth.user.id;let report=null;
+    if(selectedEvent&&!offline){try{report=await api('/ratings?'+new URLSearchParams({eventKey:selectedEvent,mode:'opr'}));await meta(`ratings:${userId}:${selectedEvent}`,report);}catch(error){report={error:error.message};}}
+    else if(selectedEvent)report=await readMeta(`ratings:${userId}:${selectedEvent}`)||null;
+    if(version!==viewVersion)return'';ratingReport=report;
+    return heading('Event analytics','Combine scouting and official fuel contributions, then check predictions on later matches.')+`<section class="card analytics-controls"><label class="field">Find teams<input type="search" id="analyticsSearch" value="${esc(search)}" placeholder="Team number or name; commas compare teams"></label><div class="chart-tabs" aria-label="Analytics views">${choices.map(([key,label])=>`<button class="chart-tab ${view===key?'active':''}" data-view="${key}" aria-pressed="${view===key}">${label}</button>`).join('')}</div></section>`+oprMarkup(ratingReport,oprWeight,search,oprSort);
+  }
   const metricOptions=selected=>Object.entries(METRICS).map(([key,item])=>`<option value="${key}" ${key===selected?'selected':''}>${esc(item.label)}</option>`).join('');
   const table=`<div class="table-wrap"><table><thead><tr><th>Team</th><th>Matches</th>${keys.map(k=>`<th><button class="table-sort" data-metric="${k}">${esc(METRICS[k].label)}</button></th>`).join('')}<th>${esc(METRICS[metric].label)} · median</th></tr></thead><tbody>${filtered.map(t=>`<tr><td><button class="team-link" data-team-focus="${t.teamNumber}">${esc(teamLabel(t.teamNumber))}</button></td><td>${t.records.length}</td>${keys.map(k=>percentileCell(teams,t,k)).join('')}<td>${fmt(t.metrics[metric].median)}</td></tr>`).join('')||'<tr><td colspan="7">No completed matches for this selection yet.</td></tr>'}</tbody></table></div>`;
   const common=context.matches.filter(m=>{const selected=filtered.map(t=>t.teamNumber);return selected.length>=2&&selected.filter(t=>[...m.red,...m.blue].includes(t)).length>=2;});
@@ -171,13 +184,24 @@ async function renderAlliances(){
     `<section class="card"><h2>New alliance plan</h2><form id="allianceForm" class="grid grid-2">${field('Plan name','name','','text','required maxlength="100"')}${[1,2,3].map(n=>`<label class="field">Team ${n}${n===1?' (required)':''}<select name="team${n}" ${n===1?'required':''}><option value="">Select a team</option>${context.teams.map(t=>`<option value="${t.team_number}">${esc(teamLabel(t.team_number))}</option>`).join('')}</select></label>`).join('')}<label class="field wide">Strategy<textarea name="strategy" maxlength="8000" rows="4" placeholder="Scorer, passer, defense and autonomous paths"></textarea></label><button class="button button-primary" ${offline||!event?'disabled':''}>Save alliance plan</button></form></section>`+
     allianceData.map(a=>{const members=teams.filter(t=>a.teams.includes(t.teamNumber));const estimated=members.length===a.teams.length&&members.every(t=>t.metrics.estimatedPoints.mean!==null)?members.reduce((sum,t)=>sum+t.metrics.estimatedPoints.mean,0):null;return`<section class="card"><h2>${esc(a.name)}</h2><p>${a.teams.map(teamLabel).map(esc).join(' / ')}</p><p class="preserve-lines">${esc(a.strategy)}</p>${can('analytics')?`<p>Estimated combined points: <strong>${fmt(estimated)}</strong> · individual means, without interaction or opponent modeling.</p><div class="button-row"><button class="button button-secondary" data-alliance-compare="${a.teams.join(',')}">Compare these teams</button></div>`:''}${a.created_by===auth.user.id||can('admin')?`<button class="mini-button danger" data-delete-alliance="${a.id}">Remove plan</button>`:''}</section>`;}).join('');
 }
-async function renderAdmin(){
-  if(!offline){try{adminData={users:(await api('/admin/users')).users,rotations:event?(await api('/admin/rotations?'+new URLSearchParams({eventKey:event}))).rotations:[]};}catch(error){return`<section class="card">${esc(error.message)}</section>`;}}
+async function renderAdmin(version){
+  const selectedEvent=event,userId=auth.user.id;
+  if(!offline){try{adminData={users:(await api('/admin/users')).users,rotations:selectedEvent?(await api('/admin/rotations?'+new URLSearchParams({eventKey:selectedEvent}))).rotations:[]};}catch(error){return`<section class="card">${esc(error.message)}</section>`;}}
+  if(version!==viewVersion)return'';
   if(!adminData)return'<section class="card">Reconnect to manage events and rotations.</section>';
   draftRows=adminData.rotations.map(r=>({userId:String(r.user_id),rotation:r.rotation,rotationCount:r.rotation_count,alliance:r.alliance,station:r.station}));
+  let data={review:null,roster:null,entries:[]};
+  if(selectedEvent&&!offline){
+    const query=new URLSearchParams({eventKey:selectedEvent});
+    const results=await Promise.allSettled([api('/admin/match-review?'+query),api('/ratings?'+query+'&mode=roster'),api('/admin/match-entries?'+query)]);
+    data={review:results[0].status==='fulfilled'?results[0].value:{error:results[0].reason.message},roster:results[1].status==='fulfilled'?results[1].value:{error:results[1].reason.message},entries:results[2].status==='fulfilled'?results[2].value.entries:[]};
+    await meta(`quality:${userId}:${selectedEvent}`,data);
+  }else if(selectedEvent)data=await readMeta(`quality:${userId}:${selectedEvent}`)||data;
+  if(version!==viewVersion)return'';qualityData=data;
   return heading('Scouting administration','Import the TBA schedule. Assign each scouter a Red or Blue station for this event.')+
     `<section class="card"><a href="/admin">Manage user permissions</a><h2>Import / refresh TBA schedule</h2><form id="importEventForm" class="grid grid-2">${field('TBA event key','eventKey',event==='legacy'?'':event,'text','required pattern="2026[a-z0-9]+" placeholder="2026tnkn"')}${field('TBA Read API key (optional if configured on server)','apiKey','','password','autocomplete="off"')}<button class="button button-primary" ${offline?'disabled':''}>Import event, teams and matches</button></form><p>The key is used only for the import and is not saved in browser storage. Reimporting retains all scouted matches.</p></section>`+
-    `<section class="card"><span class="eyebrow">EVENT CREW</span><h2>Scout stations · ${esc(event||'choose an imported event')}</h2><p>One group scouts every qualification match. With 2 groups, group 1 scouts odd matches and group 2 scouts even matches. Quantitative-only users must follow their station; users with additional permissions retain manual selection.</p><form id="rotationsForm"><label class="field">Total rotation groups<input name="rotationCount" type="number" min="1" max="100" value="${draftRows[0]?.rotationCount||1}" required></label><div class="table-wrap"><table><thead><tr><th>Scouter</th><th>Group</th><th>Scout station</th><th></th></tr></thead><tbody id="rotationRows">${draftRows.map((r,i)=>rotationRow(r,i)).join('')}</tbody></table></div><div class="button-row"><button type="button" id="addRotation" class="button button-secondary">Add scouter</button><button class="button button-primary" ${offline||!event?'disabled':''}>Save scout stations</button></div><p id="coverageNotice" class="section-help"></p></form></section>`;
+    `<section class="card"><span class="eyebrow">EVENT CREW</span><h2>Scout stations · ${esc(event||'choose an imported event')}</h2><p>One group scouts every qualification match. With 2 groups, group 1 scouts odd matches and group 2 scouts even matches. Quantitative-only users must follow their station; users with additional permissions retain manual selection.</p><form id="rotationsForm"><label class="field">Total rotation groups<input name="rotationCount" type="number" min="1" max="100" value="${draftRows[0]?.rotationCount||1}" required></label><div class="table-wrap"><table><thead><tr><th>Scouter</th><th>Group</th><th>Scout station</th><th></th></tr></thead><tbody id="rotationRows">${draftRows.map((r,i)=>rotationRow(r,i)).join('')}</tbody></table></div><div class="button-row"><button type="button" id="addRotation" class="button button-secondary">Add scouter</button><button class="button button-primary" ${offline||!event?'disabled':''}>Save scout stations</button></div><p id="coverageNotice" class="section-help"></p></form></section>`+
+    rosterMarkup(qualityData.roster,rosterSearch,rosterSort)+reviewMarkup(qualityData.review,qualityData.entries,{threshold:reviewThreshold,filter:reviewFilter,query:reviewSearch,entryQuery:entrySearch,offline:offline||!event});
 }
 function rotationRow(r,i){return`<tr data-rotation-row="${i}"><td><select name="userId" aria-label="Scouter" required><option value="">Choose scouter</option>${adminData.users.map(u=>`<option value="${u.id}" ${u.id===r.userId?'selected':''}>${esc(u.email)}</option>`).join('')}</select></td><td><input name="rotation" aria-label="Rotation group" type="number" min="1" max="100" value="${r.rotation||1}" required></td><td><select name="scoutStation" aria-label="Scout station">${['red','blue'].flatMap(a=>[1,2,3].map(n=>`<option value="${a}:${n}" ${a===(r.alliance||'red')&&n===(r.station||1)?'selected':''}>${a==='red'?'Red':'Blue'} scout ${n}</option>`)).join('')}</select></td><td><button type="button" class="mini-button danger" data-remove-rotation>Remove</button></td></tr>`;}
 async function renderSync(){const local=(await all()).filter(r=>r.ownerUserId===auth.user.id||can('sync'));return heading('Synchronization','Pending matches stay on this device until the server acknowledges their revision.')+`<section class="card"><button class="button button-primary" id="syncNow">Retry pending matches</button><div class="table-wrap"><table><thead><tr><th>Event</th><th>Match / team</th><th>Type</th><th>Status</th><th>Resolution</th></tr></thead><tbody>${local.map(r=>`<tr><td>${esc(r.eventKey)}</td><td>${esc(r.matchKey||r.matchNumber)} / ${r.teamNumber}</td><td>${esc(r.kind||'quantitative')}</td><td>${esc(r.syncStatus)}<small class="error-text">${esc(r.lastSyncError||'')}</small></td><td>${r.syncStatus==='conflict'?`<button class="mini-button" data-server-version="${esc(r.recordId)}">Keep server version</button>${!r.completed?`<button class="mini-button" data-local-version="${esc(r.recordId)}">Retry local draft as newer</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div></section>`;}
@@ -206,9 +230,9 @@ async function render(){
   const r=route();let body;
   if(!allowed(r))body='<section class="card"><h1>Access required</h1><p>Ask a website administrator to grant access to this area.</p><a href="/">Your permissions</a></section>';
   else if(['quantitative','qualitative'].includes(r))body=await renderScouting(r);
-  else if(r==='analytics')body=await renderAnalytics();
+  else if(r==='analytics')body=await renderAnalytics(version);
   else if(r==='alliances')body=await renderAlliances();
-  else if(r==='admin')body=await renderAdmin();
+  else if(r==='admin')body=await renderAdmin(version);
   else if(r==='sync')body=await renderSync();
   else if(r==='settings')body=await renderSettings();
   else body=`<section class="card"><h1>${esc(auth.user.email)}</h1><p>All accounts and permissions are managed by the shared portal.</p><a href="/">Your account</a><button id="signOut" class="button">Sign out</button></section>`;
@@ -237,6 +261,35 @@ async function start(input){
   event=eventKey;await meta('selectedEvent',event);await put(r);await meta(`active:${auth.user.id}:${kind}`,r.recordId);await refreshContext();await render();
 }
 async function selectEvent(value){event=value;draft=null;remoteRecords=[];context={teams:[],matches:[],assignments:[],completed:[]};selectedMatch=null;await meta('selectedEvent',event);await refreshContext();await render();}
+function updateRoster(){if($('#rosterResults'))$('#rosterResults').innerHTML=rosterResults(qualityData.roster,rosterSearch,rosterSort);}
+function updateReview(){if($('#reviewResults'))$('#reviewResults').innerHTML=reviewResults(qualityData.review,reviewThreshold,reviewFilter,reviewSearch,offline);}
+function updateOpr(){if($('#oprResults'))$('#oprResults').innerHTML=oprResults(ratingReport,oprWeight,search,oprSort);if($('#oprWeightLabel'))$('#oprWeightLabel').textContent=Math.round(oprWeight*100)+'%';}
+function bindQuality(){
+  $('#oprWeight')?.addEventListener('input',e=>{oprWeight=Number(e.target.value)/100;updateOpr();});
+  $('#oprWeight')?.addEventListener('change',guard(async()=>{await meta(`oprWeight:${auth.user.id}:${event}`,oprWeight);}));
+  $('#resetOprWeight')?.addEventListener('click',guard(async()=>{oprWeight=.5;$('#oprWeight').value=50;updateOpr();await meta(`oprWeight:${auth.user.id}:${event}`,oprWeight);}));
+  $('#rosterSearch')?.addEventListener('input',e=>{rosterSearch=e.target.value;updateRoster();});
+  $('#reviewSearch')?.addEventListener('input',e=>{reviewSearch=e.target.value;updateReview();});
+  $('#reviewFilter')?.addEventListener('change',e=>{reviewFilter=e.target.value;updateReview();});
+  $('#entrySearch')?.addEventListener('input',e=>{entrySearch=e.target.value;$('#entryResults').innerHTML=entryResults(qualityData.entries,entrySearch,offline);});
+  $('#reviewThreshold')?.addEventListener('input',e=>{reviewThreshold=Number(e.target.value)/100;$('#reviewThresholdLabel').textContent=Math.round(reviewThreshold*100)+'%';updateReview();});
+  $('#reviewThreshold')?.addEventListener('change',guard(async()=>{await meta(`reviewThreshold:${auth.user.id}:${event}`,reviewThreshold);}));
+  $('#pullScores')?.addEventListener('click',guard(async e=>{const button=e.currentTarget;button.disabled=true;button.textContent='Pulling official scores…';try{const result=await api('/admin/pull-scores',{method:'POST',body:{eventKey:event}});toast(`Pulled ${result.matches} matches; ${result.scored} have official fuel scores.`);await render();}finally{button.disabled=false;button.textContent='Pull every match score from TBA';}}));
+  $('#cancelDeleteMatch')?.addEventListener('click',()=>$('#deleteMatchDialog').close());
+  $('#deleteMatchForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();const form=e.currentTarget,button=form.querySelector('button[type=submit],button:not([type])');button.disabled=true;$('#deleteMatchError').textContent='';
+    try{const result=await api('/admin/match-entry',{method:'DELETE',body:Object.fromEntries(new FormData(form))});await removeLocal(result.recordId);if(draft?.recordId===result.recordId)draft=null;$('#deleteMatchDialog').close();await refreshContext();toast(`Deleted ${result.matchKey.toUpperCase()} / team ${result.teamNumber}. Its owner can rescout.`);await render();}
+    catch(error){$('#deleteMatchError').textContent=error.message;}finally{button.disabled=false;}
+  });
+  $('#mainContent').onclick=guard(async e=>{
+    const button=e.target.closest('button');if(!button)return;
+    if(button.dataset.rosterSort){rosterSort=button.dataset.rosterSort;updateRoster();}
+    if(button.dataset.oprSort){oprSort=button.dataset.oprSort;updateOpr();}
+    if(button.closest('#oprResults')&&button.dataset.teamFocus){search=button.dataset.teamFocus;$('#analyticsSearch').value=search;updateOpr();}
+    if(button.dataset.scouterFocus){const scouter=qualityData.roster?.scouters?.find(s=>s.id===button.dataset.scouterFocus);entrySearch=scouter?.name||'';$('#entrySearch').value=entrySearch;$('#entryResults').innerHTML=entryResults(qualityData.entries,entrySearch,offline);$('#allEntries').open=true;$('#allEntries').scrollIntoView({behavior:'smooth',block:'start'});}
+    if(button.dataset.deleteRecord){const record=qualityData.entries.find(r=>r.recordId===button.dataset.deleteRecord);if(!record)throw new Error('Reload to find this match entry.');const form=$('#deleteMatchForm');form.reset();form.elements.recordId.value=record.recordId;$('#deleteMatchDescription').textContent=`${record.matchKey.toUpperCase()} · Team ${record.teamNumber} · ${record.scouter} · ${record.kind}`;$('#deleteMatchError').textContent='';$('#deleteMatchDialog').showModal();}
+  });
+}
 async function persistAnalysis(){await meta(`analysis:${auth.user.id}:${event}`,analysisOptions);await render();}
 function guard(fn){return async e=>{try{await fn(e);}catch(error){toast(error.message);}};}
 function bind(){
@@ -268,7 +321,7 @@ function bind(){
   });
   $('#trimCount')?.addEventListener('change',guard(async e=>{analysisOptions[metric]={...analysisOptions[metric],trim:Math.max(0,Math.min(100,Number(e.target.value)||0))};await persistAnalysis();}));
   $$('[data-sample]').forEach(b=>b.addEventListener('change',guard(async()=>{const opts=analysisOptions[metric]||{},byTeam={...opts.excludedByTeam},set=new Set(byTeam[b.dataset.sampleTeam]||[]);if(b.checked)set.delete(b.dataset.sample);else set.add(b.dataset.sample);byTeam[b.dataset.sampleTeam]=[...set];analysisOptions[metric]={...opts,excludedByTeam:byTeam};await persistAnalysis();})));
-  $$('[data-team-focus]').forEach(b=>b.addEventListener('click',guard(async()=>{search=b.dataset.teamFocus;await render();})));
+  $$('[data-team-focus]:not(#oprResults [data-team-focus])').forEach(b=>b.addEventListener('click',guard(async()=>{search=b.dataset.teamFocus;await render();})));
   $$('[data-team-view]').forEach(b=>b.addEventListener('click',guard(async()=>{[search,view]=b.dataset.teamView.split(':');await render();})));
   $$('[data-match]').forEach(b=>b.addEventListener('click',guard(async()=>{selectedMatch=b.dataset.match;await render();})));
   $$('[data-match-view]').forEach(b=>b.addEventListener('click',guard(async()=>{const m=context.matches.find(m=>m.match_key===selectedMatch);search=[...m.red,...m.blue].join(', ');view=b.dataset.matchView;await render();})));
@@ -283,6 +336,7 @@ function bind(){
   $$('[data-server-version]').forEach(b=>b.addEventListener('click',guard(async()=>{const record=await get(b.dataset.serverVersion);if(record.conflictServerRecord)await put({...record.conflictServerRecord,syncStatus:'synced'});await render();})));
   $$('[data-local-version]').forEach(b=>b.addEventListener('click',guard(async()=>{const record=await get(b.dataset.localVersion);if(record.completed)throw new Error('Submitted matches cannot be changed');await put({...record,revision:Math.max(record.revision,record.conflictServerRecord?.revision||0)+1,conflictServerRecord:null,syncStatus:'pending'});await syncAll();await render();})));
   $('#signOut')?.addEventListener('click',guard(async()=>{if(offline)throw new Error('Reconnect to sign out');const response=await fetch('/logout',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf_token:auth.csrfToken})});if(!response.ok)throw new Error('Could not sign out');localStorage.removeItem(SNAPSHOT);location.assign('/');}));
+  bindQuality();
 }
 async function init(){
   db=await openDb();await refreshAuth();if(auth)await refreshContext();

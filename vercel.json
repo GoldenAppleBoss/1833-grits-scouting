@@ -4,8 +4,12 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": { "api/index.mjs": { "maxDuration": 60, "includeFiles": "scouting/public/**" } },
+  "functions": {
+    "api/index.mjs": { "maxDuration": 60, "includeFiles": "scouting/public/**" },
+    "api/ratings.py": { "maxDuration": 60, "excludeFiles": "{node_modules/**,.local/**,tests/**,scouting/**}" }
+  },
   "rewrites": [
+    { "source": "/scouting/api/ratings", "destination": "/api/ratings" },
     { "source": "/", "destination": "/api/index" },
     { "source": "/signup", "destination": "/api/index" },
     { "source": "/login", "destination": "/api/index" },
